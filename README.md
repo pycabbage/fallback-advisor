@@ -1,29 +1,31 @@
 # fallback-advisor
 
-Claude Code の Advisor 相当のセカンドオピニオンを、サーバー側 advisor tool を介さず Claude Agent SDK の通常推論で提供し、モデルが拒否した場合も実行を中断させない MCP ツールです。
+An MCP tool that provides a Claude Code Advisor-style second opinion via Claude Agent SDK normal inference — without going through the server-side advisor tool — and that does not interrupt the caller even when the model refuses.
 
-## セットアップ
+## Setup
 
 ```sh
-# TODO: セットアップ手順は後で記述する
+# TODO: write setup instructions later
 ```
 
 <details>
-<summary>解決する課題: Fable 5 を Advisor モデルにすると Advisor tool がハード失敗する</summary>
+<summary>The problem it solves: the Advisor tool hard-fails when Fable 5 is the Advisor model</summary>
 
-### 現在の Claude Code の問題
+### The current Claude Code problem
 
-Claude Code の Advisor tool（サーバー側 `advisor_20260301`）は、会話履歴全体を上位のレビュアーモデルへ渡してセカンドオピニオンを得る機能です。しかし **Advisor モデルに Fable 5 を指定すると、tool calling 自体がハードに失敗**します（`The advisor tool is unavailable.`）。graceful なフォールバックが無く、呼び出し元の実行（ターン）がそのまま中断されてしまいます。Opus 4.8 では発生しないため、やむを得ず Opus 4.8 を Advisor モデルに指定して回避していました。
+Claude Code's Advisor tool (the server-side `advisor_20260301`) forwards the whole conversation history to a stronger reviewer model to obtain a second opinion. However, **when Fable 5 is set as the Advisor model, the tool call itself hard-fails** (`The advisor tool is unavailable.`). There is no graceful fallback, so the caller's turn is simply interrupted. Because this does not happen with Opus 4.8, Opus 4.8 had to be used as the Advisor model as a workaround.
 
-### このプロジェクトの解決策
+### How this project solves it
 
-同等のセカンドオピニオンを、`advisor_20260301` を介さず **Claude Agent SDK の通常推論**として実装します。
+It implements the same second opinion as **Claude Agent SDK normal inference**, without going through `advisor_20260301`.
 
-- `~/.claude/projects/` から対象プロジェクトの会話履歴を読み込み、レビュアー用のプロンプトで単発推論します。
-- モデルが拒否しても、SDK 純正の refusal-fallback により別モデルへ自動フォールバックし、**実行を完走**させます。どのモデルが応答したか・フォールバックの有無は透過的に返します。
-- セーフガードは尊重し、回避を目的とはしません（拒否は拒否として扱います）。
-- Claude Agent SDK は内部で Claude Code を動かすため、Claude サブスクリプションの利用枠で動作します。
+- It reads the target project's conversation history from `~/.claude/projects/` and runs a single-turn inference with a reviewer prompt.
+- If the model refuses, the SDK's built-in refusal-fallback switches to another model so the run still **completes**. Which model actually responded, and whether a fallback occurred, are reported transparently.
+- Safeguards are respected, not evaded (a refusal is treated as a refusal).
+- Because the Claude Agent SDK runs Claude Code internally, it works within the Claude subscription quota.
 
-設計判断の詳細は [`docs/adr/`](docs/adr/README.md) を参照してください。
+> Operational note: a slow inference can still be cut off by the caller's own MCP tool-call timeout, which would re-introduce a hard failure. Configure a generous MCP tool timeout; the tool's internal timeout defaults to 300s.
+
+See [`docs/adr/`](docs/adr/README.md) for the design decisions (in Japanese).
 
 </details>
