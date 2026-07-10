@@ -6,7 +6,11 @@
     "MD013": false,
     // MD060 (table-column-style): 全角文字を含む表は「文字数」での桁揃えが
     // 非現実的（編集のたびに崩れる）なため無効化する。
-    "MD060": false
+    "MD060": false,
+    // MD033 (no-inline-html): README 等で <details>/<summary> を使うため除外する。
+    "MD033": {
+      "allowed_elements": ["details", "summary"]
+    }
   },
   // node_modules 配下の Markdown は対象外にする。
   "ignores": ["node_modules", "**/node_modules/**"]
