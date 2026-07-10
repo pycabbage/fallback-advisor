@@ -1,3 +1,4 @@
+# AGENTS
 
 Default to using Bun instead of Node.js.
 
@@ -104,3 +105,13 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## Markdown
+
+Markdown ファイル（`*.md`）を追加・編集したら、必ず次のコマンドを実行して lint エラーがないことを確認する:
+
+```sh
+bun markdownlint-cli2 "**/*.md"
+```
+
+lint ルールの調整は `.markdownlint-cli2.jsonc` を参照。

@@ -1,0 +1,13 @@
+{
+  "config": {
+    "default": true,
+    // MD013 (line-length): 日本語プロースを 80 桁で折り返すと、Markdown の
+    // ソフト改行が表示上の空白として混入し表示が崩れるため無効化する。
+    "MD013": false,
+    // MD060 (table-column-style): 全角文字を含む表は「文字数」での桁揃えが
+    // 非現実的（編集のたびに崩れる）なため無効化する。
+    "MD060": false
+  },
+  // node_modules 配下の Markdown は対象外にする。
+  "ignores": ["node_modules", "**/node_modules/**"]
+}
