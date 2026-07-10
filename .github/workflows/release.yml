@@ -32,7 +32,7 @@ jobs:
           if [[ "$TARGET" == *"win32"* ]]; then
             OUTFILE="${OUTFILE}.exe"
           fi
-          bun build --compile --outfile="build/${OUTFILE}" --bytecode src/index.ts
+          bun build --compile --outfile="build/${OUTFILE}" --bytecode --production --target=bun --splitting --format=esm src/index.ts
           echo "target=$TARGET" >> $GITHUB_OUTPUT
           echo "outfile=$OUTFILE" >> $GITHUB_OUTPUT
       - uses: actions/upload-artifact@v7
@@ -52,7 +52,6 @@ jobs:
         with:
           path: build
           merge-multiple: true
-      - run: ls -lha . build
       - id: prepare
         run: |
           if [[ "$(jq -r '.version' package.json)" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

@@ -1,13 +1,14 @@
 {
   "name": "fallback-advisor",
   "module": "src/index.ts",
-  "version": "0.0.0-rc.0",
+  "version": "0.0.0-rc.1",
   "description": "An MCP tool that provides a second opinion equivalent to Claude Code's Advisor—using standard Claude Agent SDK inference rather than a server-side advisor tool—and ensures execution continues even if the model issues a refusal.",
   "type": "module",
   "private": true,
   "scripts": {
     "prepare": "husky",
     "lint": "biome check",
+    "test": "bun test",
     "dev": "mcp-inspector -- bun run src/index.ts"
   },
   "dependencies": {
