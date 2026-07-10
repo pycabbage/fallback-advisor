@@ -1,17 +1,21 @@
 {
-  "name": "self-advisor",
+  "name": "fallback-advisor",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "scripts": {
     "prepare": "husky",
-    "lint": "biome check"
+    "lint": "biome check",
+    "dev": "mcp-inspector -- bun run src/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.206"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.206",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.3",
+    "@modelcontextprotocol/inspector": "^0.22.0",
     "@types/bun": "latest",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8"

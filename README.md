@@ -1,4 +1,4 @@
-# self-advisor
+# fallback-advisor
 
 To install dependencies:
 
