@@ -44,6 +44,22 @@ export function buildProgram(handlers: {
       await handlers.onServe()
     })
 
+  program.addHelpText(
+    "after",
+    `
+Environment variables:
+  FALLBACK_ADVISOR_MODEL        Reviewer model (default: claude-fable-5). Same as --model.
+  FALLBACK_ADVISOR_TIMEOUT_MS   Per-call inference timeout in ms (default: 300000). Same as --timeout-ms.
+  FALLBACK_ADVISOR_MAX_CHARS    Max transcript characters to send (default: 200000). Same as --max-chars.
+  FALLBACK_ADVISOR_CLAUDE_PATH  Path to the host Claude Code executable the SDK spawns
+                                (default: ~/.local/bin/claude). Set this if Claude Code is
+                                installed elsewhere or on a non-Linux OS.
+  CLAUDE_PROJECT_DIR            Project directory used to locate session history when the
+                                server's working directory differs from the target project.
+
+CLI flags take precedence over the corresponding environment variables.`
+  )
+
   return program
 }
 

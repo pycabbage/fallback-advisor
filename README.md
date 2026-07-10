@@ -10,6 +10,15 @@ Download latest release from [Releases](https://github.com/pycabbage/fallback-ad
 claude mcp add --transport stdio -e FALLBACK_ADVISOR_MODEL=claude-fable-5 fallback-advisor -- "[Path to fallback-advisor executable]"
 ```
 
+## Configuration
+
+All configuration is via environment variables:
+
+- `FALLBACK_ADVISOR_MODEL`: reviewer model to request (default `claude-fable-5`).
+- `FALLBACK_ADVISOR_TIMEOUT_MS`: per-call inference timeout in milliseconds (default `300000`).
+- `FALLBACK_ADVISOR_MAX_CHARS`: maximum transcript characters sent to the reviewer (default `200000`).
+- `FALLBACK_ADVISOR_CLAUDE_PATH`: absolute path to the host `claude` executable that the Agent SDK spawns. Normally not needed: it defaults to the standard install location `~/.local/bin/claude`. Set it only if Claude Code is installed elsewhere, or on a non-Linux OS where that path does not apply. If the resolved path does not exist, the tool returns a clear error instead of running.
+
 <details>
 <summary>The problem it solves: the Advisor tool hard-fails when Fable 5 is the Advisor model</summary>
 

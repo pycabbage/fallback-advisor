@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import {
   getSessionMessages,
   listSessions,
@@ -8,6 +9,7 @@ import {
   DEFAULT_MODEL,
   DEFAULT_TIMEOUT_MS,
   envNumber,
+  resolveClaudeExecutablePath,
 } from "./config"
 import { type HistoryDeps, loadTranscript } from "./history"
 import { buildPrompt, REVIEWER_SYSTEM_PROMPT } from "./prompt"
@@ -99,6 +101,18 @@ export async function runFallbackAdvisor(
   // 8. Assemble the prompt.
   const prompt = buildPrompt(transcript, input.context)
 
+  // 8b. Preflight: the SDK spawns the host Claude Code CLI, which must exist.
+  // Passing pathToClaudeCodeExecutable also makes the SDK skip its own
+  // import.meta.url resolution (broken in a --compile'd binary).
+  const claudePath = resolveClaudeExecutablePath()
+  if (!existsSync(claudePath)) {
+    return baseError(
+      `Claude Code executable not found at ${claudePath}. ` +
+        `This MCP server spawns the host Claude Code CLI; set FALLBACK_ADVISOR_CLAUDE_PATH to its location.`,
+      notes
+    )
+  }
+
   // 9. AbortController with a timeout.
   const abortController = new AbortController()
   const timer = setTimeout(() => abortController.abort(), timeoutMs)
@@ -162,6 +176,7 @@ export async function runFallbackAdvisor(
         maxTurns: 1,
         settingSources: [],
         persistSession: false,
+        pathToClaudeCodeExecutable: claudePath,
         // Because tools:[] means no permission prompts occur, bypassPermissions
         // and similar are unnecessary and would over-grant a read-only advisor,
         // so they are intentionally not set.

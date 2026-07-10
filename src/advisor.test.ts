@@ -1,8 +1,26 @@
-import { expect, test } from "bun:test"
+import { afterEach, beforeEach, expect, test } from "bun:test"
 import type { AdvisorDeps } from "./advisor"
 import { runFallbackAdvisor } from "./advisor"
 import { REVIEWER_SYSTEM_PROMPT } from "./prompt"
 import type { FallbackAdvisorInput } from "./schema"
+
+// ---------------------------------------------------------------------------
+// Claude executable preflight: point it at a path that definitely exists
+// (the running interpreter) so tests reach query(); restore per test.
+// ---------------------------------------------------------------------------
+
+let prevClaudePath: string | undefined
+
+beforeEach(() => {
+  prevClaudePath = process.env.FALLBACK_ADVISOR_CLAUDE_PATH
+  process.env.FALLBACK_ADVISOR_CLAUDE_PATH = process.execPath
+})
+
+afterEach(() => {
+  if (prevClaudePath === undefined)
+    delete process.env.FALLBACK_ADVISOR_CLAUDE_PATH
+  else process.env.FALLBACK_ADVISOR_CLAUDE_PATH = prevClaudePath
+})
 
 // ---------------------------------------------------------------------------
 // Fake dependency helpers
@@ -122,6 +140,8 @@ test("success: result.result becomes advice, respondedModel from assistant", asy
     expect(options.persistSession).toBe(false)
     expect(options.model).toBe("claude-requested")
     expect(options.systemPrompt).toBe(REVIEWER_SYSTEM_PROMPT)
+    // The SDK is pointed at the resolved host Claude Code executable.
+    expect(options.pathToClaudeCodeExecutable).toBe(process.execPath)
     // The option keys must be exactly the intended set. This fails if any
     // permission/bypass flag (or any other option) is ever added.
     expect(Object.keys(options).sort()).toEqual([
@@ -129,6 +149,7 @@ test("success: result.result becomes advice, respondedModel from assistant", asy
       "env",
       "maxTurns",
       "model",
+      "pathToClaudeCodeExecutable",
       "persistSession",
       "settingSources",
       "stderr",
@@ -139,6 +160,33 @@ test("success: result.result becomes advice, respondedModel from assistant", asy
     if (prev === undefined) delete process.env.FALLBACK_ADVISOR_MODEL
     else process.env.FALLBACK_ADVISOR_MODEL = prev
   }
+})
+
+// ---------------------------------------------------------------------------
+// claude executable preflight
+// ---------------------------------------------------------------------------
+
+test("preflight: a missing claude executable returns a structured error before query", async () => {
+  let queryCalled = false
+  const { deps } = makeDeps({
+    sessions: [{ sessionId: "s1", lastModified: 100 }],
+    messagesBySession: { s1: [userMsg("task")] },
+    queryImpl: () => {
+      queryCalled = true
+      throw new Error("query must not be called when the preflight fails")
+    },
+  })
+
+  process.env.FALLBACK_ADVISOR_CLAUDE_PATH =
+    "/nonexistent/path/claude-does-not-exist-12345"
+
+  const out = await runFallbackAdvisor(baseInput, deps)
+
+  expect(out.isError).toBe(true)
+  expect(out.advice).toContain("FALLBACK_ADVISOR_CLAUDE_PATH")
+  expect(out.advice).toContain("/nonexistent/path/claude-does-not-exist-12345")
+  // The preflight must short-circuit before the SDK is ever invoked.
+  expect(queryCalled).toBe(false)
 })
 
 // ---------------------------------------------------------------------------
