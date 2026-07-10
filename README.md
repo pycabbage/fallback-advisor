@@ -4,8 +4,10 @@ An MCP tool that provides a Claude Code Advisor-style second opinion via Claude 
 
 ## Setup
 
+Download latest release from [Releases](https://github.com/pycabbage/fallback-advisor/releases)
+
 ```sh
-# TODO: write setup instructions later
+claude mcp add --transport stdio -e FALLBACK_ADVISOR_MODEL=claude-fable-5 fallback-advisor -- "[Path to fallback-advisor executable]"
 ```
 
 <details>

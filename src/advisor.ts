@@ -41,8 +41,7 @@ export async function runFallbackAdvisor(
   deps: AdvisorDeps = DEFAULT_DEPS
 ): Promise<FallbackAdvisorOutput> {
   const scope: Scope = input.scope ?? "session"
-  const requestedModel =
-    input.model ?? process.env.FALLBACK_ADVISOR_MODEL ?? DEFAULT_MODEL
+  const requestedModel = process.env.FALLBACK_ADVISOR_MODEL ?? DEFAULT_MODEL
   const dir = input.cwd ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd()
 
   const maxChars = envNumber(

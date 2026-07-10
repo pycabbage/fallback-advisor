@@ -63,7 +63,6 @@ function userMsg(text: string): FakeSessionMessage {
 }
 
 const baseInput: FallbackAdvisorInput = {
-  model: "claude-requested",
   scope: "session",
 }
 
@@ -72,67 +71,74 @@ const baseInput: FallbackAdvisorInput = {
 // ---------------------------------------------------------------------------
 
 test("success: result.result becomes advice, respondedModel from assistant", async () => {
-  const { deps, getCapturedParams } = makeDeps({
-    sessions: [{ sessionId: "s1", lastModified: 100 }],
-    messagesBySession: { s1: [userMsg("do the thing")] },
-    queryMessages: [
-      {
-        type: "assistant",
-        message: {
-          model: "claude-responder",
-          content: [{ type: "text", text: "partial text" }],
+  const prev = process.env.FALLBACK_ADVISOR_MODEL
+  process.env.FALLBACK_ADVISOR_MODEL = "claude-requested"
+  try {
+    const { deps, getCapturedParams } = makeDeps({
+      sessions: [{ sessionId: "s1", lastModified: 100 }],
+      messagesBySession: { s1: [userMsg("do the thing")] },
+      queryMessages: [
+        {
+          type: "assistant",
+          message: {
+            model: "claude-responder",
+            content: [{ type: "text", text: "partial text" }],
+          },
         },
-      },
-      {
-        type: "result",
-        subtype: "success",
-        result: "final advice",
-        total_cost_usd: 0.01,
-        num_turns: 1,
-      },
-    ],
-    stderrText: "informational warning line",
-  })
+        {
+          type: "result",
+          subtype: "success",
+          result: "final advice",
+          total_cost_usd: 0.01,
+          num_turns: 1,
+        },
+      ],
+      stderrText: "informational warning line",
+    })
 
-  const out = await runFallbackAdvisor(baseInput, deps)
+    const out = await runFallbackAdvisor(baseInput, deps)
 
-  expect(out.isError).toBe(false)
-  expect(out.advice).toBe("final advice")
-  expect(out.requestedModel).toBe("claude-requested")
-  expect(out.respondedModel).toBe("claude-responder")
-  expect(out.fallbackOccurred).toBe(false)
-  expect(out.costUsd).toBe(0.01)
-  expect(out.numTurns).toBe(1)
-  expect(out.messageCount).toBe(1)
-  expect(out.sessionCount).toBe(1)
+    expect(out.isError).toBe(false)
+    expect(out.advice).toBe("final advice")
+    expect(out.requestedModel).toBe("claude-requested")
+    expect(out.respondedModel).toBe("claude-responder")
+    expect(out.fallbackOccurred).toBe(false)
+    expect(out.costUsd).toBe(0.01)
+    expect(out.numTurns).toBe(1)
+    expect(out.messageCount).toBe(1)
+    expect(out.sessionCount).toBe(1)
 
-  // Behavior #6: stderr is attached as an informational note even on success.
-  expect(out.note).toContain("stderr(informational)")
-  expect(out.note).toContain("informational warning line")
+    // Behavior #6: stderr is attached as an informational note even on success.
+    expect(out.note).toContain("stderr(informational)")
+    expect(out.note).toContain("informational warning line")
 
-  // Behavior #2 / #7: query options are exactly the intended set.
-  const params = getCapturedParams()
-  expect(params).not.toBeNull()
-  const options = params?.options as FakeOptions
-  expect(options.tools).toEqual([])
-  expect(options.maxTurns).toBe(1)
-  expect(options.settingSources).toEqual([])
-  expect(options.persistSession).toBe(false)
-  expect(options.model).toBe("claude-requested")
-  expect(options.systemPrompt).toBe(REVIEWER_SYSTEM_PROMPT)
-  // The option keys must be exactly the intended set. This fails if any
-  // permission/bypass flag (or any other option) is ever added.
-  expect(Object.keys(options).sort()).toEqual([
-    "abortController",
-    "env",
-    "maxTurns",
-    "model",
-    "persistSession",
-    "settingSources",
-    "stderr",
-    "systemPrompt",
-    "tools",
-  ])
+    // Behavior #2 / #7: query options are exactly the intended set.
+    const params = getCapturedParams()
+    expect(params).not.toBeNull()
+    const options = params?.options as FakeOptions
+    expect(options.tools).toEqual([])
+    expect(options.maxTurns).toBe(1)
+    expect(options.settingSources).toEqual([])
+    expect(options.persistSession).toBe(false)
+    expect(options.model).toBe("claude-requested")
+    expect(options.systemPrompt).toBe(REVIEWER_SYSTEM_PROMPT)
+    // The option keys must be exactly the intended set. This fails if any
+    // permission/bypass flag (or any other option) is ever added.
+    expect(Object.keys(options).sort()).toEqual([
+      "abortController",
+      "env",
+      "maxTurns",
+      "model",
+      "persistSession",
+      "settingSources",
+      "stderr",
+      "systemPrompt",
+      "tools",
+    ])
+  } finally {
+    if (prev === undefined) delete process.env.FALLBACK_ADVISOR_MODEL
+    else process.env.FALLBACK_ADVISOR_MODEL = prev
+  }
 })
 
 // ---------------------------------------------------------------------------

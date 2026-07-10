@@ -1,5 +1,4 @@
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
-import { server } from "./server"
+import { run } from "./cli"
 
 export type { AdvisorDeps } from "./advisor"
 // Public API re-exports.
@@ -12,7 +11,8 @@ export type {
 } from "./schema"
 export { server } from "./server"
 
-// Start the stdio server only when run directly, never on import.
+// Start the CLI (which starts the stdio server by default) only when run
+// directly, never on import.
 if (import.meta.main) {
-  void server.connect(new StdioServerTransport())
+  void run(process.argv)
 }

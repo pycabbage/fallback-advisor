@@ -1,5 +1,4 @@
 import { z } from "zod"
-import { DEFAULT_MODEL } from "./config"
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -13,12 +12,6 @@ export const zFallbackAdvisorInput = z.object({
     .optional()
     .describe(
       "Additional instruction or question for the reviewer; appended to the end of the prompt."
-    ),
-  model: z
-    .string()
-    .optional()
-    .describe(
-      `Reviewer model. Defaults to the FALLBACK_ADVISOR_MODEL environment variable, or "${DEFAULT_MODEL}" if unset.`
     ),
   scope: z
     .enum(["session", "project"])
