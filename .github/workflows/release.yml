@@ -29,6 +29,9 @@ jobs:
         run: |
           TARGET=$(bun -e "console.log(\`\${process.platform}-\${process.arch}\`)")
           OUTFILE=build/fallback-advisor-${TARGET}
+          if [[ "$TARGET" == *"win32"* ]]; then
+            OUTFILE="${OUTFILE}.exe"
+          fi
           bun build --compile --outfile="$OUTFILE" --bytecode src/index.ts
           echo "target=$TARGET" >> $GITHUB_OUTPUT
           echo "outfile=$OUTFILE" >> $GITHUB_OUTPUT
