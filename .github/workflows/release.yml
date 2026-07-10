@@ -34,7 +34,7 @@ jobs:
           echo "outfile=$OUTFILE" >> $GITHUB_OUTPUT
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.build.outputs.outfile }}
+          name: ${{ steps.build.outputs.target }}
           path: ${{ steps.build.outputs.outfile }}
 
   release:
