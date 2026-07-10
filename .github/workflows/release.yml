@@ -51,6 +51,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: build
+          merge-multiple: true
       - run: ls -lha . build
       - id: prepare
         run: |
