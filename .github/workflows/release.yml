@@ -28,17 +28,17 @@ jobs:
         shell: bash
         run: |
           TARGET=$(bun -e "console.log(\`\${process.platform}-\${process.arch}\`)")
-          OUTFILE=build/fallback-advisor-${TARGET}
+          OUTFILE="fallback-advisor-${TARGET}"
           if [[ "$TARGET" == *"win32"* ]]; then
             OUTFILE="${OUTFILE}.exe"
           fi
-          bun build --compile --outfile="$OUTFILE" --bytecode src/index.ts
+          bun build --compile --outfile="build/${OUTFILE}" --bytecode src/index.ts
           echo "target=$TARGET" >> $GITHUB_OUTPUT
           echo "outfile=$OUTFILE" >> $GITHUB_OUTPUT
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.build.outputs.target }}
-          path: ${{ steps.build.outputs.outfile }}
+          name: ${{ steps.build.outputs.outfile }}
+          path: build/${{ steps.build.outputs.outfile }}
 
   release:
     runs-on: ubuntu-latest
@@ -47,6 +47,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
+        with:
+          path: build
       - run: ls -lha . build
       - id: prepare
         run: |
