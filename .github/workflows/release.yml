@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      matrix:
+        platform:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - id: build
+        run: |
+          TARGET=$(bun -e "console.log(\`\${process.platform}-\${process.arch}\`)")
+
+          OUTFILE=build/fallback-advisor-${TARGET}
+          bun build --compile --outfile="$OUTFILE" --bytecode src/index.ts
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+          echo "outfile=$OUTFILE" >> $GITHUB_OUTPUT
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.build.outputs.outfile }}
+          path: ${{ steps.build.outputs.outfile }}
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.ref_type == 'tag'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: "fallback-advisor-*"
+      - run: ls -lha . build
+      - id: prepare
+        run: |
+          if [[ "$(jq -r '.version' package.json)" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          fi
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: build/fallback-advisor-*
+          prerelease: ${{ steps.prepare.outputs.is_prerelease }}
