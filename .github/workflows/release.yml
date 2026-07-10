@@ -25,9 +25,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - id: build
+        shell: bash
         run: |
           TARGET=$(bun -e "console.log(\`\${process.platform}-\${process.arch}\`)")
-
           OUTFILE=build/fallback-advisor-${TARGET}
           bun build --compile --outfile="$OUTFILE" --bytecode src/index.ts
           echo "target=$TARGET" >> $GITHUB_OUTPUT
