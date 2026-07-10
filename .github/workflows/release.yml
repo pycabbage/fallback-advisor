@@ -47,8 +47,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
-        with:
-          name: "*"
       - run: ls -lha . build
       - id: prepare
         run: |
