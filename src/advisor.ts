@@ -13,6 +13,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   envBool,
   envNumber,
+  loadSettingsEnv,
   resolveClaudeExecutablePath,
 } from "./config"
 import { type HistoryDeps, loadTranscript } from "./history"
@@ -216,7 +217,9 @@ export async function runFallbackAdvisor(
         // unresolved one would otherwise hang until timeoutMs aborts it.
         ...(hasTools ? { canUseTool } : {}),
         abortController,
-        env: { ...process.env },
+        // Merge whitelisted inference-routing vars from ~/.claude/settings.json
+        // first so that process.env (if already populated) takes precedence.
+        env: { ...loadSettingsEnv(), ...process.env },
         stderr: (d) => {
           stderrChunks.push(d)
         },
