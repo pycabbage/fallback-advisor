@@ -87,14 +87,13 @@ Environment variables:
                                        tool flags below are disabled). Same as --max-turns.
   FALLBACK_ADVISOR_ALLOW_READ          Allow the reviewer to use the Read tool (default: off/false).
                                        Unrestricted (Read(*)-equivalent), not sandboxed to the
-                                       project dir. Same as --allow-read. See README for the
-                                       security note before enabling.
+                                       project dir. Same as --allow-read.
   FALLBACK_ADVISOR_ALLOW_WEB           Allow the reviewer to use WebSearch/WebFetch (default: on/true).
                                        Same as --allow-web. Disable with --no-allow-web or by setting
                                        this to false/0. This alone already risks transcript
                                        exfiltration via a crafted query/URL if the transcript contains
                                        a prompt injection; enabling FALLBACK_ADVISOR_ALLOW_READ too adds
-                                       a local-file exfiltration path. See README.
+                                       a local-file exfiltration path.
   FALLBACK_ADVISOR_CLAUDE_PROJECT_DIR  Project directory used to locate session history when the
                                        server's working directory differs from the target project.
 

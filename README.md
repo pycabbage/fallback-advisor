@@ -21,7 +21,7 @@ Claude Code's Advisor tool (the server-side `advisor_20260301`) forwards the who
 
 It implements the same second opinion as **Claude Agent SDK normal inference**, without going through `advisor_20260301`.
 
-- It reads the target project's conversation history from `~/.claude/projects/` and runs a single-turn inference with a reviewer prompt.
+- It reads the target project's conversation history from `~/.claude/projects/` and runs the reviewer prompt through inference — agentic (multi-turn) by default, since `WebSearch`/`WebFetch` are available to the reviewer by default; single-turn only if both tool flags are disabled (see Configuration).
 - If the model refuses, the SDK's built-in refusal-fallback switches to another model so the run still **completes**. Which model actually responded, and whether a fallback occurred, are reported transparently.
 - Safeguards are respected, not evaded (a refusal is treated as a refusal).
 - Because the Claude Agent SDK runs Claude Code internally, it works within the Claude subscription quota.

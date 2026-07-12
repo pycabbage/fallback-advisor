@@ -80,6 +80,28 @@ function userMsg(text: string): FakeSessionMessage {
   return { type: "user", message: { content: text } }
 }
 
+// Temporarily set (or delete, for `undefined`) each env var in `overrides`,
+// run `fn`, then restore every var to its prior value.
+async function withEnv(
+  overrides: Record<string, string | undefined>,
+  fn: () => Promise<void>
+): Promise<void> {
+  const prev: Record<string, string | undefined> = {}
+  for (const [key, value] of Object.entries(overrides)) {
+    prev[key] = process.env[key]
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  try {
+    await fn()
+  } finally {
+    for (const [key, value] of Object.entries(prev)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
+
 const baseInput: FallbackAdvisorInput = {
   scope: "session",
 }
@@ -89,90 +111,86 @@ const baseInput: FallbackAdvisorInput = {
 // ---------------------------------------------------------------------------
 
 test("success: result.result becomes advice, respondedModel from assistant", async () => {
-  const prev = process.env.FALLBACK_ADVISOR_MODEL
-  const prevAllowWeb = process.env.FALLBACK_ADVISOR_ALLOW_WEB
-  process.env.FALLBACK_ADVISOR_MODEL = "claude-requested"
-  // FALLBACK_ADVISOR_ALLOW_WEB now defaults to true; force it off here so
-  // this test exercises the fully-disabled path (tools:[], maxTurns:1, no
-  // canUseTool) that its assertions below depend on.
-  process.env.FALLBACK_ADVISOR_ALLOW_WEB = "false"
-  try {
-    const { deps, getCapturedParams } = makeDeps({
-      sessions: [{ sessionId: "s1", lastModified: 100 }],
-      messagesBySession: { s1: [userMsg("do the thing")] },
-      queryMessages: [
-        {
-          type: "assistant",
-          message: {
-            model: "claude-responder",
-            content: [{ type: "text", text: "partial text" }],
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_MODEL: "claude-requested",
+      // FALLBACK_ADVISOR_ALLOW_WEB now defaults to true; force it off here so
+      // this test exercises the fully-disabled path (tools:[], maxTurns:1, no
+      // canUseTool) that its assertions below depend on.
+      FALLBACK_ADVISOR_ALLOW_WEB: "false",
+    },
+    async () => {
+      const { deps, getCapturedParams } = makeDeps({
+        sessions: [{ sessionId: "s1", lastModified: 100 }],
+        messagesBySession: { s1: [userMsg("do the thing")] },
+        queryMessages: [
+          {
+            type: "assistant",
+            message: {
+              model: "claude-responder",
+              content: [{ type: "text", text: "partial text" }],
+            },
           },
-        },
-        {
-          type: "result",
-          subtype: "success",
-          result: "final advice",
-          total_cost_usd: 0.01,
-          num_turns: 1,
-        },
-      ],
-      stderrText: "informational warning line",
-    })
+          {
+            type: "result",
+            subtype: "success",
+            result: "final advice",
+            total_cost_usd: 0.01,
+            num_turns: 1,
+          },
+        ],
+        stderrText: "informational warning line",
+      })
 
-    const out = await runFallbackAdvisor(baseInput, deps)
+      const out = await runFallbackAdvisor(baseInput, deps)
 
-    expect(out.isError).toBe(false)
-    expect(out.advice).toBe("final advice")
-    expect(out.requestedModel).toBe("claude-requested")
-    expect(out.respondedModel).toBe("claude-responder")
-    expect(out.fallbackOccurred).toBe(false)
-    expect(out.costUsd).toBe(0.01)
-    expect(out.numTurns).toBe(1)
-    expect(out.messageCount).toBe(1)
-    expect(out.sessionCount).toBe(1)
+      expect(out.isError).toBe(false)
+      expect(out.advice).toBe("final advice")
+      expect(out.requestedModel).toBe("claude-requested")
+      expect(out.respondedModel).toBe("claude-responder")
+      expect(out.fallbackOccurred).toBe(false)
+      expect(out.costUsd).toBe(0.01)
+      expect(out.numTurns).toBe(1)
+      expect(out.messageCount).toBe(1)
+      expect(out.sessionCount).toBe(1)
 
-    // Behavior #6: stderr is attached as an informational note even on success.
-    expect(out.note).toContain("stderr(informational)")
-    expect(out.note).toContain("informational warning line")
+      // Behavior #6: stderr is attached as an informational note even on success.
+      expect(out.note).toContain("stderr(informational)")
+      expect(out.note).toContain("informational warning line")
 
-    // Behavior #2 / #7: query options are exactly the intended set.
-    const params = getCapturedParams()
-    expect(params).not.toBeNull()
-    const options = params?.options as FakeOptions
-    expect(options.tools).toEqual([])
-    expect(options.maxTurns).toBe(1)
-    expect(options.settingSources).toEqual([])
-    expect(options.persistSession).toBe(false)
-    expect(options.model).toBe("claude-requested")
-    expect(options.systemPrompt).toBe(REVIEWER_SYSTEM_PROMPT)
-    // The SDK is pointed at the resolved host Claude Code executable.
-    expect(options.pathToClaudeCodeExecutable).toBe(process.execPath)
-    // No tool is enabled by default: tools stays empty and maxTurns stays 1.
-    expect(options.tools).toEqual([])
-    expect(options.maxTurns).toBe(1)
-    expect(options.cwd).toBe(process.cwd())
-    // The option keys must be exactly the intended set. This fails if any
-    // permission/bypass flag (or any other option) is ever added.
-    expect(Object.keys(options).sort()).toEqual([
-      "abortController",
-      "cwd",
-      "env",
-      "maxTurns",
-      "model",
-      "pathToClaudeCodeExecutable",
-      "persistSession",
-      "settingSources",
-      "stderr",
-      "systemPrompt",
-      "tools",
-    ])
-  } finally {
-    if (prev === undefined) delete process.env.FALLBACK_ADVISOR_MODEL
-    else process.env.FALLBACK_ADVISOR_MODEL = prev
-    if (prevAllowWeb === undefined)
-      delete process.env.FALLBACK_ADVISOR_ALLOW_WEB
-    else process.env.FALLBACK_ADVISOR_ALLOW_WEB = prevAllowWeb
-  }
+      // Behavior #2 / #7: query options are exactly the intended set.
+      const params = getCapturedParams()
+      expect(params).not.toBeNull()
+      const options = params?.options as FakeOptions
+      expect(options.tools).toEqual([])
+      expect(options.maxTurns).toBe(1)
+      expect(options.settingSources).toEqual([])
+      expect(options.persistSession).toBe(false)
+      expect(options.model).toBe("claude-requested")
+      expect(options.systemPrompt).toBe(REVIEWER_SYSTEM_PROMPT)
+      // The SDK is pointed at the resolved host Claude Code executable.
+      expect(options.pathToClaudeCodeExecutable).toBe(process.execPath)
+      // No tool is enabled by default: tools stays empty and maxTurns stays 1.
+      expect(options.tools).toEqual([])
+      expect(options.maxTurns).toBe(1)
+      expect(options.cwd).toBe(process.cwd())
+      // The option keys must be exactly the intended set. This fails if any
+      // permission/bypass flag (or any other option) is ever added.
+      expect(Object.keys(options).sort()).toEqual([
+        "abortController",
+        "cwd",
+        "env",
+        "maxTurns",
+        "model",
+        "pathToClaudeCodeExecutable",
+        "persistSession",
+        "settingSources",
+        "stderr",
+        "systemPrompt",
+        "tools",
+      ])
+    }
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -186,66 +204,60 @@ type FakeCanUseTool = (
 ) => Promise<{ behavior: string; message?: string }>
 
 test("FALLBACK_ADVISOR_ALLOW_READ=1: tools=['Read'], maxTurns=10, canUseTool allows Read / denies others", async () => {
-  const prev = process.env.FALLBACK_ADVISOR_ALLOW_READ
-  const prevAllowWeb = process.env.FALLBACK_ADVISOR_ALLOW_WEB
-  process.env.FALLBACK_ADVISOR_ALLOW_READ = "1"
-  // FALLBACK_ADVISOR_ALLOW_WEB now defaults to true; force it off so this
-  // test isolates ALLOW_READ's effect (tools stays exactly ['Read']).
-  process.env.FALLBACK_ADVISOR_ALLOW_WEB = "false"
-  try {
-    const { deps, getCapturedParams } = makeDeps({
-      sessions: [{ sessionId: "s1", lastModified: 100 }],
-      messagesBySession: { s1: [userMsg("task")] },
-      queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
-    })
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_ALLOW_READ: "1",
+      // FALLBACK_ADVISOR_ALLOW_WEB now defaults to true; force it off so this
+      // test isolates ALLOW_READ's effect (tools stays exactly ['Read']).
+      FALLBACK_ADVISOR_ALLOW_WEB: "false",
+    },
+    async () => {
+      const { deps, getCapturedParams } = makeDeps({
+        sessions: [{ sessionId: "s1", lastModified: 100 }],
+        messagesBySession: { s1: [userMsg("task")] },
+        queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
+      })
 
-    await runFallbackAdvisor(baseInput, deps)
+      await runFallbackAdvisor(baseInput, deps)
 
-    const options = getCapturedParams()?.options as FakeOptions
-    expect(options.tools).toEqual(["Read"])
-    expect(options.maxTurns).toBe(10)
-    expect(typeof options.canUseTool).toBe("function")
+      const options = getCapturedParams()?.options as FakeOptions
+      expect(options.tools).toEqual(["Read"])
+      expect(options.maxTurns).toBe(10)
+      expect(typeof options.canUseTool).toBe("function")
 
-    const canUseTool = options.canUseTool as FakeCanUseTool
-    const allowed = await canUseTool("Read", {}, {} as never)
-    expect(allowed).toEqual({ behavior: "allow" })
+      const canUseTool = options.canUseTool as FakeCanUseTool
+      const allowed = await canUseTool("Read", {}, {} as never)
+      expect(allowed).toEqual({ behavior: "allow" })
 
-    const denied = await canUseTool("Bash", {}, {} as never)
-    expect(denied.behavior).toBe("deny")
-    expect(typeof denied.message).toBe("string")
-    expect((denied.message ?? "").length).toBeGreaterThan(0)
+      const denied = await canUseTool("Bash", {}, {} as never)
+      expect(denied.behavior).toBe("deny")
+      expect(typeof denied.message).toBe("string")
+      expect((denied.message ?? "").length).toBeGreaterThan(0)
 
-    // The option keys must be exactly the intended set for the tools-enabled
-    // path too: canUseTool is the only addition over the no-tools baseline,
-    // and no other permission/bypass flag (e.g. allowedTools,
-    // bypassPermissions, permissionMode) is ever introduced alongside it.
-    expect(Object.keys(options).sort()).toEqual([
-      "abortController",
-      "canUseTool",
-      "cwd",
-      "env",
-      "maxTurns",
-      "model",
-      "pathToClaudeCodeExecutable",
-      "persistSession",
-      "settingSources",
-      "stderr",
-      "systemPrompt",
-      "tools",
-    ])
-  } finally {
-    if (prev === undefined) delete process.env.FALLBACK_ADVISOR_ALLOW_READ
-    else process.env.FALLBACK_ADVISOR_ALLOW_READ = prev
-    if (prevAllowWeb === undefined)
-      delete process.env.FALLBACK_ADVISOR_ALLOW_WEB
-    else process.env.FALLBACK_ADVISOR_ALLOW_WEB = prevAllowWeb
-  }
+      // The option keys must be exactly the intended set for the tools-enabled
+      // path too: canUseTool is the only addition over the no-tools baseline,
+      // and no other permission/bypass flag (e.g. allowedTools,
+      // bypassPermissions, permissionMode) is ever introduced alongside it.
+      expect(Object.keys(options).sort()).toEqual([
+        "abortController",
+        "canUseTool",
+        "cwd",
+        "env",
+        "maxTurns",
+        "model",
+        "pathToClaudeCodeExecutable",
+        "persistSession",
+        "settingSources",
+        "stderr",
+        "systemPrompt",
+        "tools",
+      ])
+    }
+  )
 })
 
 test("FALLBACK_ADVISOR_ALLOW_WEB=1: tools=['WebSearch','WebFetch']", async () => {
-  const prev = process.env.FALLBACK_ADVISOR_ALLOW_WEB
-  process.env.FALLBACK_ADVISOR_ALLOW_WEB = "1"
-  try {
+  await withEnv({ FALLBACK_ADVISOR_ALLOW_WEB: "1" }, async () => {
     const { deps, getCapturedParams } = makeDeps({
       sessions: [{ sessionId: "s1", lastModified: 100 }],
       messagesBySession: { s1: [userMsg("task")] },
@@ -256,72 +268,62 @@ test("FALLBACK_ADVISOR_ALLOW_WEB=1: tools=['WebSearch','WebFetch']", async () =>
 
     const options = getCapturedParams()?.options as FakeOptions
     expect(options.tools).toEqual(["WebSearch", "WebFetch"])
-  } finally {
-    if (prev === undefined) delete process.env.FALLBACK_ADVISOR_ALLOW_WEB
-    else process.env.FALLBACK_ADVISOR_ALLOW_WEB = prev
-  }
+  })
 })
 
 test("default (neither ALLOW_READ nor ALLOW_WEB set): Web tools are on by default, Read stays off", async () => {
-  const prevRead = process.env.FALLBACK_ADVISOR_ALLOW_READ
-  const prevWeb = process.env.FALLBACK_ADVISOR_ALLOW_WEB
   // Force the true "neither set" state regardless of ambient shell/CI env.
-  delete process.env.FALLBACK_ADVISOR_ALLOW_READ
-  delete process.env.FALLBACK_ADVISOR_ALLOW_WEB
-  try {
-    const { deps, getCapturedParams } = makeDeps({
-      sessions: [{ sessionId: "s1", lastModified: 100 }],
-      messagesBySession: { s1: [userMsg("task")] },
-      queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
-    })
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_ALLOW_READ: undefined,
+      FALLBACK_ADVISOR_ALLOW_WEB: undefined,
+    },
+    async () => {
+      const { deps, getCapturedParams } = makeDeps({
+        sessions: [{ sessionId: "s1", lastModified: 100 }],
+        messagesBySession: { s1: [userMsg("task")] },
+        queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
+      })
 
-    await runFallbackAdvisor(baseInput, deps)
+      await runFallbackAdvisor(baseInput, deps)
 
-    const options = getCapturedParams()?.options as FakeOptions
-    expect(options.tools).toEqual(["WebSearch", "WebFetch"])
-    expect(options.maxTurns).toBe(10)
-    expect(typeof options.canUseTool).toBe("function")
+      const options = getCapturedParams()?.options as FakeOptions
+      expect(options.tools).toEqual(["WebSearch", "WebFetch"])
+      expect(options.maxTurns).toBe(10)
+      expect(typeof options.canUseTool).toBe("function")
 
-    const canUseTool = options.canUseTool as FakeCanUseTool
-    expect(await canUseTool("WebSearch", {}, {} as never)).toEqual({
-      behavior: "allow",
-    })
-    expect(await canUseTool("WebFetch", {}, {} as never)).toEqual({
-      behavior: "allow",
-    })
-    const denied = await canUseTool("Read", {}, {} as never)
-    expect(denied.behavior).toBe("deny")
-  } finally {
-    if (prevRead === undefined) delete process.env.FALLBACK_ADVISOR_ALLOW_READ
-    else process.env.FALLBACK_ADVISOR_ALLOW_READ = prevRead
-    if (prevWeb === undefined) delete process.env.FALLBACK_ADVISOR_ALLOW_WEB
-    else process.env.FALLBACK_ADVISOR_ALLOW_WEB = prevWeb
-  }
+      const canUseTool = options.canUseTool as FakeCanUseTool
+      expect(await canUseTool("WebSearch", {}, {} as never)).toEqual({
+        behavior: "allow",
+      })
+      expect(await canUseTool("WebFetch", {}, {} as never)).toEqual({
+        behavior: "allow",
+      })
+      const denied = await canUseTool("Read", {}, {} as never)
+      expect(denied.behavior).toBe("deny")
+    }
+  )
 })
 
 test("FALLBACK_ADVISOR_MAX_TURNS explicit override wins over the tools-enabled default of 10", async () => {
-  const prevRead = process.env.FALLBACK_ADVISOR_ALLOW_READ
-  const prevMaxTurns = process.env.FALLBACK_ADVISOR_MAX_TURNS
-  process.env.FALLBACK_ADVISOR_ALLOW_READ = "1"
-  process.env.FALLBACK_ADVISOR_MAX_TURNS = "3"
-  try {
-    const { deps, getCapturedParams } = makeDeps({
-      sessions: [{ sessionId: "s1", lastModified: 100 }],
-      messagesBySession: { s1: [userMsg("task")] },
-      queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
-    })
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_ALLOW_READ: "1",
+      FALLBACK_ADVISOR_MAX_TURNS: "3",
+    },
+    async () => {
+      const { deps, getCapturedParams } = makeDeps({
+        sessions: [{ sessionId: "s1", lastModified: 100 }],
+        messagesBySession: { s1: [userMsg("task")] },
+        queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
+      })
 
-    await runFallbackAdvisor(baseInput, deps)
+      await runFallbackAdvisor(baseInput, deps)
 
-    const options = getCapturedParams()?.options as FakeOptions
-    expect(options.maxTurns).toBe(3)
-  } finally {
-    if (prevRead === undefined) delete process.env.FALLBACK_ADVISOR_ALLOW_READ
-    else process.env.FALLBACK_ADVISOR_ALLOW_READ = prevRead
-    if (prevMaxTurns === undefined)
-      delete process.env.FALLBACK_ADVISOR_MAX_TURNS
-    else process.env.FALLBACK_ADVISOR_MAX_TURNS = prevMaxTurns
-  }
+      const options = getCapturedParams()?.options as FakeOptions
+      expect(options.maxTurns).toBe(3)
+    }
+  )
 })
 
 // ---------------------------------------------------------------------------

@@ -65,20 +65,18 @@ export async function runFallbackAdvisor(
     ...(allowRead ? ["Read"] : []),
     ...(allowWeb ? ["WebSearch", "WebFetch"] : []),
   ]
+  const hasTools = toolNames.length > 0
   const maxTurns = envNumber(
     "FALLBACK_ADVISOR_MAX_TURNS",
-    toolNames.length > 0 ? DEFAULT_MAX_TURNS_WITH_TOOLS : DEFAULT_MAX_TURNS
+    hasTools ? DEFAULT_MAX_TURNS_WITH_TOOLS : DEFAULT_MAX_TURNS
   )
-  const canUseTool: CanUseTool | undefined =
-    toolNames.length > 0
-      ? async (toolName) =>
-          toolNames.includes(toolName)
-            ? { behavior: "allow" as const }
-            : {
-                behavior: "deny" as const,
-                message: `${toolName} is not enabled for FallbackAdvisor (enable it via FALLBACK_ADVISOR_ALLOW_READ/--allow-read or FALLBACK_ADVISOR_ALLOW_WEB/--allow-web).`,
-              }
-      : undefined
+  const canUseTool: CanUseTool = async (toolName) =>
+    toolNames.includes(toolName)
+      ? { behavior: "allow" as const }
+      : {
+          behavior: "deny" as const,
+          message: `${toolName} is not enabled for FallbackAdvisor (enable it via FALLBACK_ADVISOR_ALLOW_READ/--allow-read or FALLBACK_ADVISOR_ALLOW_WEB/--allow-web).`,
+        }
 
   const baseError = (
     advice: string,
@@ -216,7 +214,7 @@ export async function runFallbackAdvisor(
         // single-shot subprocess has no user to answer one, and per the
         // SDK's own docs permission prompts have no park deadline, so an
         // unresolved one would otherwise hang until timeoutMs aborts it.
-        ...(canUseTool ? { canUseTool } : {}),
+        ...(hasTools ? { canUseTool } : {}),
         abortController,
         env: { ...process.env },
         stderr: (d) => {
