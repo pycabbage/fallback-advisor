@@ -1,13 +1,17 @@
 import { existsSync } from "node:fs"
 import {
+  type CanUseTool,
   getSessionMessages,
   listSessions,
   query,
 } from "@anthropic-ai/claude-agent-sdk"
 import {
   DEFAULT_MAX_TRANSCRIPT_CHARS,
+  DEFAULT_MAX_TURNS,
+  DEFAULT_MAX_TURNS_WITH_TOOLS,
   DEFAULT_MODEL,
   DEFAULT_TIMEOUT_MS,
+  envBool,
   envNumber,
   resolveClaudeExecutablePath,
 } from "./config"
@@ -44,13 +48,37 @@ export async function runFallbackAdvisor(
 ): Promise<FallbackAdvisorOutput> {
   const scope: Scope = input.scope ?? "session"
   const requestedModel = process.env.FALLBACK_ADVISOR_MODEL ?? DEFAULT_MODEL
-  const dir = input.cwd ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd()
+  const dir =
+    input.cwd ??
+    process.env.FALLBACK_ADVISOR_CLAUDE_PROJECT_DIR ??
+    process.cwd()
 
   const maxChars = envNumber(
     "FALLBACK_ADVISOR_MAX_CHARS",
     DEFAULT_MAX_TRANSCRIPT_CHARS
   )
   const timeoutMs = envNumber("FALLBACK_ADVISOR_TIMEOUT_MS", DEFAULT_TIMEOUT_MS)
+
+  const allowRead = envBool("FALLBACK_ADVISOR_ALLOW_READ", false)
+  const allowWeb = envBool("FALLBACK_ADVISOR_ALLOW_WEB", true)
+  const toolNames: string[] = [
+    ...(allowRead ? ["Read"] : []),
+    ...(allowWeb ? ["WebSearch", "WebFetch"] : []),
+  ]
+  const maxTurns = envNumber(
+    "FALLBACK_ADVISOR_MAX_TURNS",
+    toolNames.length > 0 ? DEFAULT_MAX_TURNS_WITH_TOOLS : DEFAULT_MAX_TURNS
+  )
+  const canUseTool: CanUseTool | undefined =
+    toolNames.length > 0
+      ? async (toolName) =>
+          toolNames.includes(toolName)
+            ? { behavior: "allow" as const }
+            : {
+                behavior: "deny" as const,
+                message: `${toolName} is not enabled for FallbackAdvisor (enable it via FALLBACK_ADVISOR_ALLOW_READ/--allow-read or FALLBACK_ADVISOR_ALLOW_WEB/--allow-web).`,
+              }
+      : undefined
 
   const baseError = (
     advice: string,
@@ -74,7 +102,7 @@ export async function runFallbackAdvisor(
 
   if (loaded.sessionsFound === 0) {
     return baseError(
-      `no sessions found for dir=${dir} (if the MCP server's cwd differs from the target project, pass input.cwd or set the CLAUDE_PROJECT_DIR environment variable)`,
+      `no sessions found for dir=${dir} (if the MCP server's cwd differs from the target project, pass input.cwd or set the FALLBACK_ADVISOR_CLAUDE_PROJECT_DIR environment variable)`,
       notes
     )
   }
@@ -172,14 +200,23 @@ export async function runFallbackAdvisor(
       options: {
         model: requestedModel,
         systemPrompt: REVIEWER_SYSTEM_PROMPT,
-        tools: [],
-        maxTurns: 1,
+        tools: toolNames,
+        maxTurns,
         settingSources: [],
         persistSession: false,
         pathToClaudeCodeExecutable: claudePath,
-        // Because tools:[] means no permission prompts occur, bypassPermissions
-        // and similar are unnecessary and would over-grant a read-only advisor,
-        // so they are intentionally not set.
+        cwd: dir,
+        // When no tool is enabled (the default), tools:[] means there is
+        // nothing to permission-check, so bypassPermissions and similar are
+        // unnecessary and would over-grant a read-only advisor. When a tool
+        // IS enabled, canUseTool below resolves every tool-call permission
+        // decision itself, synchronously and deterministically (allow only
+        // the explicitly enabled tool names, deny everything else), without
+        // ever surfacing an interactive permission prompt — this headless,
+        // single-shot subprocess has no user to answer one, and per the
+        // SDK's own docs permission prompts have no park deadline, so an
+        // unresolved one would otherwise hang until timeoutMs aborts it.
+        ...(canUseTool ? { canUseTool } : {}),
         abortController,
         env: { ...process.env },
         stderr: (d) => {

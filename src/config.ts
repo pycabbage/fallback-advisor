@@ -10,6 +10,8 @@ export const DEFAULT_MAX_TRANSCRIPT_CHARS = 200_000
 export const DEFAULT_TIMEOUT_MS = 300_000
 export const BLOCK_TRUNCATE_CHARS = 1500
 export const OMIT_MARKER = "[... older history omitted ...]\n\n"
+export const DEFAULT_MAX_TURNS = 1
+export const DEFAULT_MAX_TURNS_WITH_TOOLS = 10
 
 /** Standard install location of the host Claude Code CLI. */
 export const DEFAULT_CLAUDE_PATH = join(homedir(), ".local", "bin", "claude")
@@ -34,4 +36,14 @@ export function envNumber(name: string, fallback: number): number {
   if (raw === undefined || raw === "") return fallback
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+/**
+ * Read a boolean environment variable. "1" or "true" (case-insensitive) is
+ * true; unset or empty falls back to `fallback`; any other value is false.
+ */
+export function envBool(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]
+  if (raw === undefined || raw === "") return fallback
+  return raw === "1" || raw.toLowerCase() === "true"
 }

@@ -27,7 +27,7 @@ How to call it:
 - Usually pass no arguments; it reviews the current session.
 - context (optional): a specific question or instruction for the reviewer, for example the same thing you wanted the built-in advisor to weigh in on.
 - scope (optional): "session" (default) reviews the current conversation; "project" reviews all of the project's sessions in chronological order.
-- cwd (optional): set this only if the server's working directory differs from the target project and the tool reports that no sessions were found (or set the CLAUDE_PROJECT_DIR environment variable).
+- cwd (optional): set this only if the server's working directory differs from the target project and the tool reports that no sessions were found (or set the FALLBACK_ADVISOR_CLAUDE_PROJECT_DIR environment variable).
 
 How to use the result:
 - advice is the reviewer's second opinion; give it serious weight, but adapt if it fails empirically or primary-source evidence contradicts a specific claim.
