@@ -14,14 +14,18 @@ import {
 // ---------------------------------------------------------------------------
 
 // Server-level instructions surfaced to the MCP client, so agents know to reach
-// for this tool as a fallback when Claude Code's built-in advisor tool fails.
-const SERVER_INSTRUCTIONS = `FallbackAdvisor is a fallback for Claude Code's built-in advisor tool. Use it when the built-in advisor fails: for example, when an advisor call hard-fails or returns an error such as "The advisor tool is unavailable." instead of a review. When that happens, call FallbackAdvisor to still obtain the second opinion you were seeking, so your turn is not interrupted.
-
-It automatically reads the current conversation's full transcript (the task, every tool call and its result, and your reasoning) from the local Claude Code history, so you do NOT need to paste or summarize any history; usually you call it with no arguments.
+// for this tool as a fallback (advisor failure) or primary reviewer (Bedrock etc.).
+const SERVER_INSTRUCTIONS = `FallbackAdvisor provides a second-opinion review of the current work session from a dedicated reviewer model. Call it at key decision points during any task — regardless of whether a built-in advisor tool is available in your environment.
 
 When to call it:
-- Right after a built-in advisor call fails or errors out instead of returning a review: retry the same request with this tool rather than giving up on the second opinion.
-- Use it with the same timing you would have used the built-in advisor (before committing to an approach, when stuck, before declaring a task done), once the built-in path is unavailable.
+- Before committing to a non-trivial approach: when you have a plan but want an outside perspective on blind spots or better alternatives.
+- When stuck: if you are uncertain how to proceed and want a second opinion.
+- Before declaring a significant task done: to catch mistakes, risks, or missed requirements.
+- Right after a built-in advisor call fails or returns an error such as "The advisor tool is unavailable.": retry with this tool instead of giving up on the review.
+
+If a tool named advisor_20260301 (or another built-in advisor) is listed among your available tools, prefer it first; if it is not listed, or it fails, use FallbackAdvisor directly. Do not call it when the built-in advisor has already returned a review for the same checkpoint.
+
+It automatically reads the current conversation's full transcript (the task, every tool call and its result, and your reasoning) from the local Claude Code history, so you do NOT need to paste or summarize any history; usually you call it with no arguments.
 
 How to call it:
 - Usually pass no arguments; it reviews the current session.
@@ -53,7 +57,7 @@ server.registerTool(
   {
     title: "FallbackAdvisor",
     description:
-      "A fallback for Claude Code's built-in advisor. When the built-in advisor tool fails (for example, it hard-fails or returns an error like \"The advisor tool is unavailable.\") instead of returning a review, call this to still get the second opinion so your turn is not interrupted. It automatically reads the current conversation's transcript, so you can usually call it with no arguments. Refusals, errors, and timeouts are reported in a structured form (isError); if the model refuses, the SDK's refusal-fallback completes the review with another model.",
+      "A second-opinion reviewer: call this tool at key decision points during any non-trivial task (before committing to an approach, when stuck, before declaring a significant task done) — regardless of whether a built-in advisor tool exists in your environment. If a tool named advisor_20260301 (or another built-in advisor) is listed among your available tools, prefer it first; if it is not listed, or it fails or returns an error such as \"The advisor tool is unavailable.\", use FallbackAdvisor directly. It automatically reads the current conversation's transcript, so you can usually call it with no arguments. Refusals, errors, and timeouts are reported in a structured form (isError); if the model refuses, the SDK's refusal-fallback completes the review with another model.",
     inputSchema: zFallbackAdvisorInput,
     outputSchema: zFallbackAdvisorOutput,
     annotations: {
