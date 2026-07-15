@@ -5,7 +5,10 @@ import { join } from "node:path"
 import {
   DEFAULT_CLAUDE_PATH,
   envBool,
+  envList,
+  loadMcpConfigFiles,
   loadSettingsEnv,
+  matchesToolPattern,
   resolveClaudeExecutablePath,
   SETTINGS_ENV_WHITELIST,
 } from "./config"
@@ -189,4 +192,140 @@ test("SETTINGS_ENV_WHITELIST excludes behavior-affecting vars", () => {
   for (const key of excluded) {
     expect(SETTINGS_ENV_WHITELIST.has(key)).toBe(false)
   }
+})
+
+// ---------------------------------------------------------------------------
+// envList
+// ---------------------------------------------------------------------------
+
+const ENV_LIST_KEY = "FALLBACK_ADVISOR_TEST_LIST"
+
+let prevList: string | undefined
+
+beforeEach(() => {
+  prevList = process.env[ENV_LIST_KEY]
+})
+
+afterEach(() => {
+  if (prevList === undefined) delete process.env[ENV_LIST_KEY]
+  else process.env[ENV_LIST_KEY] = prevList
+})
+
+test("envList: splits on whitespace and drops empty tokens", () => {
+  process.env[ENV_LIST_KEY] = "  a.json   b.json  "
+  expect(envList(ENV_LIST_KEY)).toEqual(["a.json", "b.json"])
+})
+
+test("envList: returns [] when unset or empty", () => {
+  delete process.env[ENV_LIST_KEY]
+  expect(envList(ENV_LIST_KEY)).toEqual([])
+  process.env[ENV_LIST_KEY] = ""
+  expect(envList(ENV_LIST_KEY)).toEqual([])
+})
+
+// ---------------------------------------------------------------------------
+// loadMcpConfigFiles
+// ---------------------------------------------------------------------------
+
+function writeJson(content: unknown, file: string): string {
+  const p = join(tmpDir, file)
+  writeFileSync(p, JSON.stringify(content), "utf8")
+  return p
+}
+
+test("loadMcpConfigFiles: loads a single file's mcpServers", () => {
+  const p = writeJson(
+    { mcpServers: { brave: { command: "bunx", args: ["brave-mcp"] } } },
+    "one.json"
+  )
+  const result = loadMcpConfigFiles([p])
+  expect(result).toEqual({ brave: { command: "bunx", args: ["brave-mcp"] } })
+})
+
+test("loadMcpConfigFiles: merges multiple files, later files win on collision", () => {
+  const a = writeJson(
+    {
+      mcpServers: {
+        brave: { command: "a" },
+        searxng: { command: "searx" },
+      },
+    },
+    "a.json"
+  )
+  const b = writeJson({ mcpServers: { brave: { command: "b" } } }, "b.json")
+  const result = loadMcpConfigFiles([a, b])
+  expect(result).toEqual({
+    brave: { command: "b" },
+    searxng: { command: "searx" },
+  })
+})
+
+test("loadMcpConfigFiles: throws for a missing file", () => {
+  expect(() => loadMcpConfigFiles([join(tmpDir, "nonexistent.json")])).toThrow(
+    /Failed to read MCP config file/
+  )
+})
+
+test("loadMcpConfigFiles: throws for invalid JSON", () => {
+  const p = join(tmpDir, "bad.json")
+  writeFileSync(p, "not json", "utf8")
+  expect(() => loadMcpConfigFiles([p])).toThrow(
+    /Failed to parse MCP config file/
+  )
+})
+
+test("loadMcpConfigFiles: throws when mcpServers key is missing or malformed", () => {
+  const missing = writeJson({ model: "sonnet" }, "missing.json")
+  expect(() => loadMcpConfigFiles([missing])).toThrow(
+    /does not have a top-level "mcpServers" object/
+  )
+
+  const malformed = writeJson({ mcpServers: "not-an-object" }, "malformed.json")
+  expect(() => loadMcpConfigFiles([malformed])).toThrow(
+    /does not have a top-level "mcpServers" object/
+  )
+})
+
+// ---------------------------------------------------------------------------
+// matchesToolPattern
+// ---------------------------------------------------------------------------
+
+test("matchesToolPattern: exact match with no wildcard", () => {
+  expect(
+    matchesToolPattern(
+      "mcp__brave__brave_web_search",
+      "mcp__brave__brave_web_search"
+    )
+  ).toBe(true)
+  expect(
+    matchesToolPattern(
+      "mcp__brave__brave_web_search",
+      "mcp__brave__brave_summarizer"
+    )
+  ).toBe(false)
+})
+
+test("matchesToolPattern: trailing wildcard matches an entire server's tools", () => {
+  expect(
+    matchesToolPattern("mcp__brave__*", "mcp__brave__brave_web_search")
+  ).toBe(true)
+  expect(matchesToolPattern("mcp__brave__*", "mcp__tavily__search")).toBe(false)
+})
+
+test("matchesToolPattern: leading, middle, and bare wildcards", () => {
+  expect(matchesToolPattern("*__foo", "mcp__foo")).toBe(true)
+  expect(matchesToolPattern("*__foo", "mcp__food")).toBe(false)
+  expect(matchesToolPattern("ab*b", "abb")).toBe(true)
+  expect(matchesToolPattern("ab*b", "ab")).toBe(false)
+  expect(matchesToolPattern("*", "anything")).toBe(true)
+})
+
+test("matchesToolPattern: many wildcards + repeated literal resolves without hanging (ReDoS shape)", () => {
+  // Classic catastrophic-backtracking shape for `(a*)+b`-style regex: many
+  // wildcards around a repeated literal, tested against a near-miss input.
+  const pattern = `${"*a".repeat(20)}*b`
+  const nonMatching = `${"a".repeat(5000)}c`
+  const start = performance.now()
+  expect(matchesToolPattern(pattern, nonMatching)).toBe(false)
+  expect(performance.now() - start).toBeLessThan(100)
 })

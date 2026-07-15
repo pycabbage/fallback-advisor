@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { AdvisorDeps } from "./advisor"
 import { runFallbackAdvisor } from "./advisor"
 import { REVIEWER_SYSTEM_PROMPT } from "./prompt"
@@ -322,6 +325,212 @@ test("FALLBACK_ADVISOR_MAX_TURNS explicit override wins over the tools-enabled d
 
       const options = getCapturedParams()?.options as FakeOptions
       expect(options.maxTurns).toBe(3)
+    }
+  )
+})
+
+// ---------------------------------------------------------------------------
+// opt-in MCP servers: --mcp-config / --allow-tool
+// ---------------------------------------------------------------------------
+
+let mcpTmpDir: string
+
+beforeEach(() => {
+  mcpTmpDir = join(
+    tmpdir(),
+    `fallback-advisor-mcp-test-${Date.now()}-${Math.random()}`
+  )
+  mkdirSync(mcpTmpDir, { recursive: true })
+})
+
+afterEach(() => {
+  rmSync(mcpTmpDir, { recursive: true, force: true })
+})
+
+function writeMcpConfig(mcpServers: Record<string, unknown>): string {
+  const p = join(mcpTmpDir, "mcp.json")
+  writeFileSync(p, JSON.stringify({ mcpServers }), "utf8")
+  return p
+}
+
+test("no FALLBACK_ADVISOR_MCP_CONFIG: mcpServers is not passed to query()", async () => {
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_MCP_CONFIG: undefined,
+      FALLBACK_ADVISOR_ALLOW_WEB: "false",
+    },
+    async () => {
+      const { deps, getCapturedParams } = makeDeps({
+        sessions: [{ sessionId: "s1", lastModified: 100 }],
+        messagesBySession: { s1: [userMsg("task")] },
+        queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
+      })
+
+      await runFallbackAdvisor(baseInput, deps)
+
+      const options = getCapturedParams()?.options as FakeOptions
+      expect(options.mcpServers).toBeUndefined()
+      expect("mcpServers" in options).toBe(false)
+    }
+  )
+})
+
+test("FALLBACK_ADVISOR_MCP_CONFIG: mcpServers is loaded and passed through, maxTurns rises to 10, canUseTool denies by default", async () => {
+  const configPath = writeMcpConfig({
+    brave: { command: "bunx", args: ["brave-mcp"] },
+  })
+
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_MCP_CONFIG: configPath,
+      FALLBACK_ADVISOR_ALLOW_WEB: "false",
+    },
+    async () => {
+      const { deps, getCapturedParams } = makeDeps({
+        sessions: [{ sessionId: "s1", lastModified: 100 }],
+        messagesBySession: { s1: [userMsg("task")] },
+        queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
+      })
+
+      await runFallbackAdvisor(baseInput, deps)
+
+      const options = getCapturedParams()?.options as FakeOptions
+      expect(options.mcpServers).toEqual({
+        brave: { command: "bunx", args: ["brave-mcp"] },
+      })
+      expect(options.maxTurns).toBe(10)
+
+      const canUseTool = options.canUseTool as FakeCanUseTool
+      const denied = await canUseTool(
+        "mcp__brave__brave_web_search",
+        {},
+        {} as never
+      )
+      expect(denied.behavior).toBe("deny")
+    }
+  )
+})
+
+test("FALLBACK_ADVISOR_ALLOW_TOOL: a matching glob pattern allows the tool, others still denied", async () => {
+  const configPath = writeMcpConfig({
+    brave: { command: "bunx", args: ["brave-mcp"] },
+  })
+
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_MCP_CONFIG: configPath,
+      FALLBACK_ADVISOR_ALLOW_TOOL: "mcp__brave__*",
+      FALLBACK_ADVISOR_ALLOW_WEB: "false",
+    },
+    async () => {
+      const { deps, getCapturedParams } = makeDeps({
+        sessions: [{ sessionId: "s1", lastModified: 100 }],
+        messagesBySession: { s1: [userMsg("task")] },
+        queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
+      })
+
+      await runFallbackAdvisor(baseInput, deps)
+
+      const options = getCapturedParams()?.options as FakeOptions
+      const canUseTool = options.canUseTool as FakeCanUseTool
+
+      const allowed = await canUseTool(
+        "mcp__brave__brave_web_search",
+        {},
+        {} as never
+      )
+      expect(allowed).toEqual({ behavior: "allow" })
+
+      const denied = await canUseTool("mcp__tavily__search", {}, {} as never)
+      expect(denied.behavior).toBe("deny")
+    }
+  )
+})
+
+test("FALLBACK_ADVISOR_ALLOW_TOOL alone (no --mcp-config): still enables canUseTool/maxTurns and can allow a tool name", async () => {
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_MCP_CONFIG: undefined,
+      FALLBACK_ADVISOR_ALLOW_TOOL: "mcp__brave__brave_web_search",
+      FALLBACK_ADVISOR_ALLOW_WEB: "false",
+    },
+    async () => {
+      const { deps, getCapturedParams } = makeDeps({
+        sessions: [{ sessionId: "s1", lastModified: 100 }],
+        messagesBySession: { s1: [userMsg("task")] },
+        queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
+      })
+
+      await runFallbackAdvisor(baseInput, deps)
+
+      const options = getCapturedParams()?.options as FakeOptions
+      expect(options.mcpServers).toBeUndefined()
+      expect(options.maxTurns).toBe(10)
+
+      const canUseTool = options.canUseTool as FakeCanUseTool
+      const allowed = await canUseTool(
+        "mcp__brave__brave_web_search",
+        {},
+        {} as never
+      )
+      expect(allowed).toEqual({ behavior: "allow" })
+    }
+  )
+})
+
+test("FALLBACK_ADVISOR_MCP_CONFIG pointing at a missing file: structured error before query, mcpServers never reaches query()", async () => {
+  let queryCalled = false
+  const { deps } = makeDeps({
+    sessions: [{ sessionId: "s1", lastModified: 100 }],
+    messagesBySession: { s1: [userMsg("task")] },
+    queryImpl: () => {
+      queryCalled = true
+      throw new Error("query must not be called when MCP config loading fails")
+    },
+  })
+
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_MCP_CONFIG: join(
+        mcpTmpDir,
+        "nonexistent-mcp-config.json"
+      ),
+    },
+    async () => {
+      const out = await runFallbackAdvisor(baseInput, deps)
+
+      expect(out.isError).toBe(true)
+      expect(out.advice).toContain("Failed to read MCP config file")
+      expect(queryCalled).toBe(false)
+    }
+  )
+})
+
+test("FALLBACK_ADVISOR_MCP_CONFIG with multiple files (space-separated): later file wins on collision", async () => {
+  const a = writeMcpConfig({ brave: { command: "a" } })
+  const bPath = join(mcpTmpDir, "b.json")
+  writeFileSync(
+    bPath,
+    JSON.stringify({ mcpServers: { brave: { command: "b" } } }),
+    "utf8"
+  )
+
+  await withEnv(
+    {
+      FALLBACK_ADVISOR_MCP_CONFIG: `${a} ${bPath}`,
+      FALLBACK_ADVISOR_ALLOW_WEB: "false",
+    },
+    async () => {
+      const { deps, getCapturedParams } = makeDeps({
+        sessions: [{ sessionId: "s1", lastModified: 100 }],
+        messagesBySession: { s1: [userMsg("task")] },
+        queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
+      })
+
+      await runFallbackAdvisor(baseInput, deps)
+
+      const options = getCapturedParams()?.options as FakeOptions
+      expect(options.mcpServers).toEqual({ brave: { command: "b" } })
     }
   )
 })

@@ -8,6 +8,8 @@ const ENV_KEYS = [
   "FALLBACK_ADVISOR_MAX_TURNS",
   "FALLBACK_ADVISOR_ALLOW_READ",
   "FALLBACK_ADVISOR_ALLOW_WEB",
+  "FALLBACK_ADVISOR_MCP_CONFIG",
+  "FALLBACK_ADVISOR_ALLOW_TOOL",
 ] as const
 
 function snapshotEnv(): Record<(typeof ENV_KEYS)[number], string | undefined> {
@@ -18,6 +20,8 @@ function snapshotEnv(): Record<(typeof ENV_KEYS)[number], string | undefined> {
     FALLBACK_ADVISOR_MAX_TURNS: process.env.FALLBACK_ADVISOR_MAX_TURNS,
     FALLBACK_ADVISOR_ALLOW_READ: process.env.FALLBACK_ADVISOR_ALLOW_READ,
     FALLBACK_ADVISOR_ALLOW_WEB: process.env.FALLBACK_ADVISOR_ALLOW_WEB,
+    FALLBACK_ADVISOR_MCP_CONFIG: process.env.FALLBACK_ADVISOR_MCP_CONFIG,
+    FALLBACK_ADVISOR_ALLOW_TOOL: process.env.FALLBACK_ADVISOR_ALLOW_TOOL,
   }
 }
 
@@ -94,6 +98,38 @@ test("applyServerOptions: leaves the three new env vars untouched when undefined
     expect(process.env.FALLBACK_ADVISOR_MAX_TURNS).toBe("sentinel-max-turns")
     expect(process.env.FALLBACK_ADVISOR_ALLOW_READ).toBe("sentinel-allow-read")
     expect(process.env.FALLBACK_ADVISOR_ALLOW_WEB).toBe("sentinel-allow-web")
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("applyServerOptions: joins mcpConfig/allowTool arrays with a space", () => {
+  const prev = snapshotEnv()
+  try {
+    applyServerOptions({
+      mcpConfig: ["a.json", "b.json"],
+      allowTool: ["mcp__brave__*", "mcp__tavily__search"],
+    })
+
+    expect(process.env.FALLBACK_ADVISOR_MCP_CONFIG).toBe("a.json b.json")
+    expect(process.env.FALLBACK_ADVISOR_ALLOW_TOOL).toBe(
+      "mcp__brave__* mcp__tavily__search"
+    )
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("applyServerOptions: leaves mcpConfig/allowTool env vars untouched when undefined", () => {
+  const prev = snapshotEnv()
+  try {
+    process.env.FALLBACK_ADVISOR_MCP_CONFIG = "sentinel-mcp-config"
+    process.env.FALLBACK_ADVISOR_ALLOW_TOOL = "sentinel-allow-tool"
+
+    applyServerOptions({ model: "claude-a" })
+
+    expect(process.env.FALLBACK_ADVISOR_MCP_CONFIG).toBe("sentinel-mcp-config")
+    expect(process.env.FALLBACK_ADVISOR_ALLOW_TOOL).toBe("sentinel-allow-tool")
   } finally {
     restoreEnv(prev)
   }
@@ -183,6 +219,53 @@ test("buildProgram: with neither --allow-web nor --no-allow-web passed, FALLBACK
     await program.parseAsync(["--model", "claude-x"], { from: "user" })
 
     expect(process.env.FALLBACK_ADVISOR_ALLOW_WEB).toBe("sentinel-allow-web")
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("buildProgram: --mcp-config joins multiple file paths with a space into FALLBACK_ADVISOR_MCP_CONFIG", async () => {
+  const prev = snapshotEnv()
+  try {
+    const program = buildProgram({ onServe: () => {} })
+    await program.parseAsync(["--mcp-config", "a.json", "b.json"], {
+      from: "user",
+    })
+
+    expect(process.env.FALLBACK_ADVISOR_MCP_CONFIG).toBe("a.json b.json")
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("buildProgram: --allow-tool joins multiple glob patterns with a space into FALLBACK_ADVISOR_ALLOW_TOOL", async () => {
+  const prev = snapshotEnv()
+  try {
+    const program = buildProgram({ onServe: () => {} })
+    await program.parseAsync(
+      ["--allow-tool", "mcp__brave__*", "mcp__tavily__search"],
+      { from: "user" }
+    )
+
+    expect(process.env.FALLBACK_ADVISOR_ALLOW_TOOL).toBe(
+      "mcp__brave__* mcp__tavily__search"
+    )
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("buildProgram: with neither --mcp-config nor --allow-tool passed, their env vars are left untouched", async () => {
+  const prev = snapshotEnv()
+  try {
+    process.env.FALLBACK_ADVISOR_MCP_CONFIG = "sentinel-mcp-config"
+    process.env.FALLBACK_ADVISOR_ALLOW_TOOL = "sentinel-allow-tool"
+
+    const program = buildProgram({ onServe: () => {} })
+    await program.parseAsync(["--model", "claude-x"], { from: "user" })
+
+    expect(process.env.FALLBACK_ADVISOR_MCP_CONFIG).toBe("sentinel-mcp-config")
+    expect(process.env.FALLBACK_ADVISOR_ALLOW_TOOL).toBe("sentinel-allow-tool")
   } finally {
     restoreEnv(prev)
   }

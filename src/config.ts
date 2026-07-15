@@ -6,7 +6,7 @@ import { join } from "node:path"
 // Constants (env-overridable)
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_MODEL = "claude-fable-5"
+export const DEFAULT_MODEL = "fable"
 export const DEFAULT_MAX_TRANSCRIPT_CHARS = 200_000
 export const DEFAULT_TIMEOUT_MS = 300_000
 export const BLOCK_TRUNCATE_CHARS = 1500
@@ -150,4 +150,120 @@ export function envBool(name: string, fallback: boolean): boolean {
   const raw = process.env[name]
   if (raw === undefined || raw === "") return fallback
   return raw === "1" || raw.toLowerCase() === "true"
+}
+
+/**
+ * Split a space-separated env var into a list of tokens (e.g. file paths or
+ * glob patterns). Collapses runs of whitespace and drops empty tokens.
+ * Returns `[]` when the variable is unset or empty.
+ */
+export function envList(name: string): string[] {
+  const raw = process.env[name]
+  if (raw === undefined || raw === "") return []
+  return raw.split(/\s+/).filter((s) => s.length > 0)
+}
+
+// ---------------------------------------------------------------------------
+// MCP server config loading (--mcp-config / FALLBACK_ADVISOR_MCP_CONFIG)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal shape this module cares about: an `mcpServers` map whose values are
+ * passed through untouched to the Agent SDK's `mcpServers` option.
+ */
+export type McpServersConfig = Record<string, unknown>
+
+/**
+ * Load and merge one or more `{"mcpServers": {...}}` JSON files (the same
+ * shape as `.mcp.json` / `.claude.mcp.json`), in the same format as Claude
+ * Code's own `--mcp-config` flag — except this only accepts file paths, not
+ * inline JSON strings. Unlike `loadSettingsEnv` (which silently returns `{}`
+ * on any failure, since it reads an implicit, not-user-specified path), this
+ * throws on a missing file, invalid JSON, or a missing/malformed `mcpServers`
+ * key: the caller explicitly opted in via `--mcp-config`, so a typo'd path or
+ * a malformed file should surface as an error rather than silently yield no
+ * servers.
+ *
+ * Later files win on a server-name collision (plain `Object.assign` merge
+ * order, left to right).
+ */
+export function loadMcpConfigFiles(paths: string[]): McpServersConfig {
+  const merged: McpServersConfig = {}
+  for (const path of paths) {
+    let raw: string
+    try {
+      raw = readFileSync(path, "utf8")
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      throw new Error(`Failed to read MCP config file ${path}: ${reason}`)
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      throw new Error(
+        `Failed to parse MCP config file ${path} as JSON: ${reason}`
+      )
+    }
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      !("mcpServers" in parsed) ||
+      typeof (parsed as Record<string, unknown>).mcpServers !== "object" ||
+      (parsed as Record<string, unknown>).mcpServers === null
+    ) {
+      throw new Error(
+        `MCP config file ${path} does not have a top-level "mcpServers" object`
+      )
+    }
+    Object.assign(
+      merged,
+      (parsed as { mcpServers: Record<string, unknown> }).mcpServers
+    )
+  }
+  return merged
+}
+
+// ---------------------------------------------------------------------------
+// Tool-name glob matching (--allow-tool / FALLBACK_ADVISOR_ALLOW_TOOL)
+// ---------------------------------------------------------------------------
+
+/**
+ * Match `toolName` against a glob `pattern` where `*` matches any substring
+ * (including empty) and every other character matches literally.
+ *
+ * Deliberately hand-rolled instead of translating to a backtracking regex
+ * (replacing each wildcard with ".*" and anchoring the result): a pattern
+ * with several wildcards interleaved with a repeated literal (e.g. `*a*a*a*a*`)
+ * is a textbook catastrophic-backtracking shape against an adversarial
+ * input that almost-but-not-quite matches. `toolName` here is a tool name
+ * declared by a connected MCP server (via `--mcp-config`), not something
+ * this process controls, so a malicious or compromised server could pick
+ * one specifically to hang the reviewer on `canUseTool`. Matching each
+ * segment between wildcards via sequential `indexOf` scans from the
+ * previous match position is linear in `toolName.length` and has no
+ * backtracking by construction, closing that off regardless of `pattern`.
+ */
+export function matchesToolPattern(pattern: string, toolName: string): boolean {
+  const segments = pattern.split("*")
+  if (segments.length === 1) return pattern === toolName
+
+  const first = segments[0]
+  const last = segments[segments.length - 1]
+  if (first !== undefined && !toolName.startsWith(first)) return false
+  if (last !== undefined && !toolName.endsWith(last)) return false
+
+  let cursor = first?.length ?? 0
+  const end = toolName.length - (last?.length ?? 0)
+  if (cursor > end) return false
+
+  for (let i = 1; i < segments.length - 1; i++) {
+    const segment = segments[i]
+    if (segment === undefined || segment === "") continue
+    const idx = toolName.indexOf(segment, cursor)
+    if (idx === -1 || idx > end - segment.length) return false
+    cursor = idx + segment.length
+  }
+  return true
 }

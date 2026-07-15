@@ -16,6 +16,8 @@ export function applyServerOptions(opts: {
   maxTurns?: string
   allowRead?: boolean
   allowWeb?: boolean
+  mcpConfig?: string[]
+  allowTool?: string[]
 }): void {
   if (opts.model !== undefined) process.env.FALLBACK_ADVISOR_MODEL = opts.model
   if (opts.timeoutMs !== undefined)
@@ -28,6 +30,10 @@ export function applyServerOptions(opts: {
     process.env.FALLBACK_ADVISOR_ALLOW_READ = String(opts.allowRead)
   if (opts.allowWeb !== undefined)
     process.env.FALLBACK_ADVISOR_ALLOW_WEB = String(opts.allowWeb)
+  if (opts.mcpConfig !== undefined)
+    process.env.FALLBACK_ADVISOR_MCP_CONFIG = opts.mcpConfig.join(" ")
+  if (opts.allowTool !== undefined)
+    process.env.FALLBACK_ADVISOR_ALLOW_TOOL = opts.allowTool.join(" ")
 }
 
 export function buildProgram(handlers: {
@@ -41,7 +47,10 @@ export function buildProgram(handlers: {
       "MCP server that gets a second opinion from a stronger reviewer model."
     )
     .version(version)
-    .option("--model <model>", "Reviewer model override")
+    .option(
+      "--model <model>",
+      "Reviewer model override: an alias ('fable', 'opus', 'sonnet', 'haiku') or a full model ID (default: fable)"
+    )
     .option("--timeout-ms <ms>", "Per-call inference timeout in milliseconds")
     .option("--max-chars <n>", "Maximum transcript characters to send")
     .option(
@@ -60,6 +69,14 @@ export function buildProgram(handlers: {
       "--max-turns <n>",
       "Maximum agentic turns for the reviewer (default: 10, since --allow-web is on by default; 1 only if both tool flags above are disabled)"
     )
+    .option(
+      "--mcp-config <files...>",
+      'Load MCP servers for the reviewer from JSON file(s) (same {"mcpServers": {...}} shape as Claude Code\'s own --mcp-config, but file paths only — no inline JSON strings). Registering a server does not by itself grant tool permission; pair with --allow-tool.'
+    )
+    .option(
+      "--allow-tool <patterns...>",
+      'Glob pattern(s) (only \'*\' is a wildcard) granting the reviewer permission to call matching tool names, e.g. registered via --mcp-config ("mcp__brave__*", "mcp__brave__brave_web_search")'
+    )
     .action(async (opts) => {
       applyServerOptions({
         model: opts.model,
@@ -68,6 +85,8 @@ export function buildProgram(handlers: {
         maxTurns: opts.maxTurns,
         allowRead: opts.allowRead,
         allowWeb: opts.allowWeb,
+        mcpConfig: opts.mcpConfig,
+        allowTool: opts.allowTool,
       })
       await handlers.onServe()
     })
@@ -76,7 +95,11 @@ export function buildProgram(handlers: {
     "after",
     `
 Environment variables:
-  FALLBACK_ADVISOR_MODEL               Reviewer model (default: claude-fable-5). Same as --model.
+  FALLBACK_ADVISOR_MODEL               Reviewer model: an alias ('fable', 'opus', 'sonnet', 'haiku')
+                                       or a full model ID (e.g. 'claude-fable-5') (default: fable).
+                                       Same as --model. Prefer an alias on Bedrock/Vertex/third-party
+                                       providers, where a full model ID is rejected — the host Claude
+                                       Code CLI resolves aliases via ANTHROPIC_DEFAULT_*_MODEL.
   FALLBACK_ADVISOR_TIMEOUT_MS          Per-call inference timeout in ms (default: 300000). Same as --timeout-ms.
   FALLBACK_ADVISOR_MAX_CHARS           Max transcript characters to send (default: 200000). Same as --max-chars.
   FALLBACK_ADVISOR_CLAUDE_PATH         Path to the host Claude Code executable the SDK spawns
@@ -96,6 +119,13 @@ Environment variables:
                                        a local-file exfiltration path.
   FALLBACK_ADVISOR_CLAUDE_PROJECT_DIR  Project directory used to locate session history when the
                                        server's working directory differs from the target project.
+  FALLBACK_ADVISOR_MCP_CONFIG          Space-separated MCP config file path(s) for the reviewer
+                                       (default: none). Same as --mcp-config, file paths only.
+                                       Registering a server here does not grant tool permission by
+                                       itself; pair with FALLBACK_ADVISOR_ALLOW_TOOL.
+  FALLBACK_ADVISOR_ALLOW_TOOL          Space-separated glob pattern(s) (only '*' is a wildcard)
+                                       granting the reviewer permission to call matching tool names
+                                       (default: none). Same as --allow-tool.
 
 CLI flags take precedence over the corresponding environment variables.`
   )

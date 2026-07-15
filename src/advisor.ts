@@ -12,8 +12,11 @@ import {
   DEFAULT_MODEL,
   DEFAULT_TIMEOUT_MS,
   envBool,
+  envList,
   envNumber,
+  loadMcpConfigFiles,
   loadSettingsEnv,
+  matchesToolPattern,
   resolveClaudeExecutablePath,
 } from "./config"
 import { type HistoryDeps, loadTranscript } from "./history"
@@ -66,17 +69,25 @@ export async function runFallbackAdvisor(
     ...(allowRead ? ["Read"] : []),
     ...(allowWeb ? ["WebSearch", "WebFetch"] : []),
   ]
-  const hasTools = toolNames.length > 0
+
+  const mcpConfigPaths = envList("FALLBACK_ADVISOR_MCP_CONFIG")
+  const allowToolPatterns = envList("FALLBACK_ADVISOR_ALLOW_TOOL")
+
+  const hasTools =
+    toolNames.length > 0 ||
+    allowToolPatterns.length > 0 ||
+    mcpConfigPaths.length > 0
   const maxTurns = envNumber(
     "FALLBACK_ADVISOR_MAX_TURNS",
     hasTools ? DEFAULT_MAX_TURNS_WITH_TOOLS : DEFAULT_MAX_TURNS
   )
   const canUseTool: CanUseTool = async (toolName) =>
-    toolNames.includes(toolName)
+    toolNames.includes(toolName) ||
+    allowToolPatterns.some((pattern) => matchesToolPattern(pattern, toolName))
       ? { behavior: "allow" as const }
       : {
           behavior: "deny" as const,
-          message: `${toolName} is not enabled for FallbackAdvisor (enable it via FALLBACK_ADVISOR_ALLOW_READ/--allow-read or FALLBACK_ADVISOR_ALLOW_WEB/--allow-web).`,
+          message: `${toolName} is not enabled for FallbackAdvisor (enable it via FALLBACK_ADVISOR_ALLOW_READ/--allow-read, FALLBACK_ADVISOR_ALLOW_WEB/--allow-web, or FALLBACK_ADVISOR_ALLOW_TOOL/--allow-tool).`,
         }
 
   const baseError = (
@@ -98,6 +109,16 @@ export async function runFallbackAdvisor(
   // 1-5. Load and serialize the transcript for the requested scope.
   const loaded = await loadTranscript(deps, dir, scope)
   const notes = [...loaded.notes]
+
+  let mcpServers: ReturnType<typeof loadMcpConfigFiles> | undefined
+  if (mcpConfigPaths.length > 0) {
+    try {
+      mcpServers = loadMcpConfigFiles(mcpConfigPaths)
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      return baseError(reason, notes)
+    }
+  }
 
   if (loaded.sessionsFound === 0) {
     return baseError(
@@ -205,6 +226,12 @@ export async function runFallbackAdvisor(
         persistSession: false,
         pathToClaudeCodeExecutable: claudePath,
         cwd: dir,
+        // `mcpServers` only registers servers/tools with the model; it does
+        // not by itself grant execution permission (that's canUseTool below).
+        // Registering a server via FALLBACK_ADVISOR_MCP_CONFIG without any
+        // matching FALLBACK_ADVISOR_ALLOW_TOOL pattern still denies every
+        // tool call from it.
+        ...(mcpServers !== undefined ? { mcpServers } : {}),
         // When no tool is enabled (the default), tools:[] means there is
         // nothing to permission-check, so bypassPermissions and similar are
         // unnecessary and would over-grant a read-only advisor. When a tool
