@@ -10,6 +10,8 @@ const ENV_KEYS = [
   "FALLBACK_ADVISOR_ALLOW_WEB",
   "FALLBACK_ADVISOR_MCP_CONFIG",
   "FALLBACK_ADVISOR_ALLOW_TOOL",
+  "FALLBACK_ADVISOR_LOG",
+  "FALLBACK_ADVISOR_LOG_DIR",
 ] as const
 
 function snapshotEnv(): Record<(typeof ENV_KEYS)[number], string | undefined> {
@@ -22,6 +24,8 @@ function snapshotEnv(): Record<(typeof ENV_KEYS)[number], string | undefined> {
     FALLBACK_ADVISOR_ALLOW_WEB: process.env.FALLBACK_ADVISOR_ALLOW_WEB,
     FALLBACK_ADVISOR_MCP_CONFIG: process.env.FALLBACK_ADVISOR_MCP_CONFIG,
     FALLBACK_ADVISOR_ALLOW_TOOL: process.env.FALLBACK_ADVISOR_ALLOW_TOOL,
+    FALLBACK_ADVISOR_LOG: process.env.FALLBACK_ADVISOR_LOG,
+    FALLBACK_ADVISOR_LOG_DIR: process.env.FALLBACK_ADVISOR_LOG_DIR,
   }
 }
 
@@ -266,6 +270,95 @@ test("buildProgram: with neither --mcp-config nor --allow-tool passed, their env
 
     expect(process.env.FALLBACK_ADVISOR_MCP_CONFIG).toBe("sentinel-mcp-config")
     expect(process.env.FALLBACK_ADVISOR_ALLOW_TOOL).toBe("sentinel-allow-tool")
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// --log / --no-log / --log-dir
+// ---------------------------------------------------------------------------
+
+test("applyServerOptions: sets FALLBACK_ADVISOR_LOG/_LOG_DIR when log/logDir are provided", () => {
+  const prev = snapshotEnv()
+  try {
+    applyServerOptions({ log: false, logDir: "/tmp/custom-logs" })
+
+    expect(process.env.FALLBACK_ADVISOR_LOG).toBe("false")
+    expect(process.env.FALLBACK_ADVISOR_LOG_DIR).toBe("/tmp/custom-logs")
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("applyServerOptions: leaves FALLBACK_ADVISOR_LOG/_LOG_DIR untouched when undefined", () => {
+  const prev = snapshotEnv()
+  try {
+    process.env.FALLBACK_ADVISOR_LOG = "sentinel-log"
+    process.env.FALLBACK_ADVISOR_LOG_DIR = "sentinel-log-dir"
+
+    applyServerOptions({ model: "claude-a" })
+
+    expect(process.env.FALLBACK_ADVISOR_LOG).toBe("sentinel-log")
+    expect(process.env.FALLBACK_ADVISOR_LOG_DIR).toBe("sentinel-log-dir")
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("buildProgram: --no-log sets FALLBACK_ADVISOR_LOG to false", async () => {
+  const prev = snapshotEnv()
+  try {
+    const program = buildProgram({ onServe: () => {} })
+    await program.parseAsync(["--no-log"], { from: "user" })
+
+    expect(process.env.FALLBACK_ADVISOR_LOG).toBe("false")
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("buildProgram: --log-dir sets FALLBACK_ADVISOR_LOG_DIR", async () => {
+  const prev = snapshotEnv()
+  try {
+    const program = buildProgram({ onServe: () => {} })
+    await program.parseAsync(["--log-dir", "/tmp/custom-logs"], {
+      from: "user",
+    })
+
+    expect(process.env.FALLBACK_ADVISOR_LOG_DIR).toBe("/tmp/custom-logs")
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("buildProgram: with neither --log nor --no-log passed, FALLBACK_ADVISOR_LOG is left untouched", async () => {
+  const prev = snapshotEnv()
+  try {
+    // Same commander quirk exercised for --allow-web above: defining --log
+    // and --no-log together means neither flag being passed leaves
+    // opts.log === undefined, so applyServerOptions' guard does not clobber
+    // a pre-set env var.
+    process.env.FALLBACK_ADVISOR_LOG = "sentinel-log"
+
+    const program = buildProgram({ onServe: () => {} })
+    await program.parseAsync(["--model", "claude-x"], { from: "user" })
+
+    expect(process.env.FALLBACK_ADVISOR_LOG).toBe("sentinel-log")
+  } finally {
+    restoreEnv(prev)
+  }
+})
+
+test("buildProgram: with --log-dir not passed, FALLBACK_ADVISOR_LOG_DIR is left untouched", async () => {
+  const prev = snapshotEnv()
+  try {
+    process.env.FALLBACK_ADVISOR_LOG_DIR = "sentinel-log-dir"
+
+    const program = buildProgram({ onServe: () => {} })
+    await program.parseAsync(["--model", "claude-x"], { from: "user" })
+
+    expect(process.env.FALLBACK_ADVISOR_LOG_DIR).toBe("sentinel-log-dir")
   } finally {
     restoreEnv(prev)
   }

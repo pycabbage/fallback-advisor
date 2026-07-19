@@ -4,12 +4,15 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   DEFAULT_CLAUDE_PATH,
+  DEFAULT_LOG_DIR,
   envBool,
   envList,
   loadMcpConfigFiles,
   loadSettingsEnv,
+  loggingEnabled,
   matchesToolPattern,
   resolveClaudeExecutablePath,
+  resolveLogDir,
   SETTINGS_ENV_WHITELIST,
 } from "./config"
 
@@ -328,4 +331,64 @@ test("matchesToolPattern: many wildcards + repeated literal resolves without han
   const start = performance.now()
   expect(matchesToolPattern(pattern, nonMatching)).toBe(false)
   expect(performance.now() - start).toBeLessThan(100)
+})
+
+// ---------------------------------------------------------------------------
+// loggingEnabled / resolveLogDir (src/logger.ts call-log configuration)
+// ---------------------------------------------------------------------------
+
+const LOG_ENV_KEYS = [
+  "FALLBACK_ADVISOR_LOG",
+  "FALLBACK_ADVISOR_LOG_DIR",
+] as const
+
+let prevLogEnv: Record<(typeof LOG_ENV_KEYS)[number], string | undefined>
+
+beforeEach(() => {
+  prevLogEnv = {
+    FALLBACK_ADVISOR_LOG: process.env.FALLBACK_ADVISOR_LOG,
+    FALLBACK_ADVISOR_LOG_DIR: process.env.FALLBACK_ADVISOR_LOG_DIR,
+  }
+})
+
+afterEach(() => {
+  for (const key of LOG_ENV_KEYS) {
+    const value = prevLogEnv[key]
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+})
+
+test("loggingEnabled: defaults to true when unset", () => {
+  delete process.env.FALLBACK_ADVISOR_LOG
+  expect(loggingEnabled()).toBe(true)
+})
+
+test("loggingEnabled: false/0 disables it", () => {
+  process.env.FALLBACK_ADVISOR_LOG = "false"
+  expect(loggingEnabled()).toBe(false)
+  process.env.FALLBACK_ADVISOR_LOG = "0"
+  expect(loggingEnabled()).toBe(false)
+})
+
+test("loggingEnabled: 1/true (case-insensitive) enables it", () => {
+  process.env.FALLBACK_ADVISOR_LOG = "1"
+  expect(loggingEnabled()).toBe(true)
+  process.env.FALLBACK_ADVISOR_LOG = "TRUE"
+  expect(loggingEnabled()).toBe(true)
+})
+
+test("resolveLogDir: defaults to DEFAULT_LOG_DIR when unset", () => {
+  delete process.env.FALLBACK_ADVISOR_LOG_DIR
+  expect(resolveLogDir()).toBe(DEFAULT_LOG_DIR)
+})
+
+test("resolveLogDir: uses FALLBACK_ADVISOR_LOG_DIR when set", () => {
+  process.env.FALLBACK_ADVISOR_LOG_DIR = "/custom/log/dir"
+  expect(resolveLogDir()).toBe("/custom/log/dir")
+})
+
+test("resolveLogDir: treats an empty env value as unset", () => {
+  process.env.FALLBACK_ADVISOR_LOG_DIR = ""
+  expect(resolveLogDir()).toBe(DEFAULT_LOG_DIR)
 })

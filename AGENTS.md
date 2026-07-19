@@ -27,6 +27,7 @@ stdio MCP サーバー。起動順は `src/index.ts`（`import.meta.main` の場
 
 - `src/history.ts` / `src/transcript.ts`: セッション取得と、トランスクリプトのシリアライズ・文字数バジェット。
 - `src/config.ts` / `src/schema.ts`: env 既定値と zod 入出力スキーマ。
+- `src/logger.ts`: 呼び出しごとの start/end を `callId` で相関させたメタデータのみの JSONL 診断ログ（`AdvisorDeps.logger`、既定で有効、`FALLBACK_ADVISOR_LOG`/`--no-log` で無効化）。設計は ADR-0006 参照。
 - テストは `AdvisorDeps` / `HistoryDeps` を注入してフェイクに差し替える方式（モジュールモックではない）。
 - `bun build --compile` の単一バイナリ配布では Agent SDK 自身のネイティブ依存解決が壊れるため、`query()` に `pathToClaudeCodeExecutable` を明示している（`src/config.ts` の `resolveClaudeExecutablePath`）。既定は `~/.local/bin/claude`（Linux 標準インストール想定）。それ以外の環境では `FALLBACK_ADVISOR_CLAUDE_PATH` の設定が必要。
 

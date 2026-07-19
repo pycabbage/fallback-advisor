@@ -17,6 +17,9 @@ export const DEFAULT_MAX_TURNS_WITH_TOOLS = 10
 /** Standard install location of the host Claude Code CLI. */
 export const DEFAULT_CLAUDE_PATH = join(homedir(), ".local", "bin", "claude")
 
+/** Default root directory for the per-call JSONL call log (see src/logger.ts). */
+export const DEFAULT_LOG_DIR = join(homedir(), ".fallback-advisor", "logs")
+
 /**
  * Resolve the host Claude Code executable that the Agent SDK spawns.
  * This MCP server always runs under Claude Code, so the executable is present
@@ -26,6 +29,24 @@ export const DEFAULT_CLAUDE_PATH = join(homedir(), ".local", "bin", "claude")
 export function resolveClaudeExecutablePath(): string {
   const raw = process.env.FALLBACK_ADVISOR_CLAUDE_PATH
   return raw === undefined || raw === "" ? DEFAULT_CLAUDE_PATH : raw
+}
+
+/**
+ * Whether the per-call JSONL call log (src/logger.ts) is enabled. Read at
+ * write time (never cached), so toggling FALLBACK_ADVISOR_LOG at runtime (or
+ * via --no-log at CLI startup, before the first tool call) takes effect.
+ */
+export function loggingEnabled(): boolean {
+  return envBool("FALLBACK_ADVISOR_LOG", true)
+}
+
+/**
+ * Resolve the call log's root directory. Read at write time (never cached);
+ * see loggingEnabled().
+ */
+export function resolveLogDir(): string {
+  const raw = process.env.FALLBACK_ADVISOR_LOG_DIR
+  return raw === undefined || raw === "" ? DEFAULT_LOG_DIR : raw
 }
 
 // ---------------------------------------------------------------------------

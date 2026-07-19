@@ -15,6 +15,7 @@
 | 0003 | [Fallback Advisor の推論基盤として Claude Agent SDK を採用する](0003-claude-agent-sdk-as-inference-engine.md)     | Accepted                                     |
 | 0004 | [レビュアーに Read / Web ツールをオプトインで許可する](0004-optional-read-web-tools-for-reviewer.md)                 | Accepted                                     |
 | 0005 | [レビュアーに MCP サーバーをオプトインで登録する](0005-optional-mcp-servers-for-reviewer.md)                         | Accepted                                     |
+| 0006 | [呼び出しごとの診断ログを JSONL で記録する](0006-per-call-jsonl-diagnostic-log.md)                                     | Accepted                                     |
 
 ## 決定の流れ / Narrative
 
@@ -23,3 +24,4 @@
 3. **ADR-0003**: その推論基盤として、Claude サブスクリプション枠を使える唯一の TS SDK である Claude Agent SDK を採用する。
 4. **ADR-0004**: `tools:[]`（ADR-0002）を 2 フラグ（`FALLBACK_ADVISOR_ALLOW_READ` はデフォルト off のオプトイン、`FALLBACK_ADVISOR_ALLOW_WEB` はデフォルト on）の後ろで条件付きに緩和する。確率的な `permissionMode:'auto'` は「外部世界への影響が絶対にない」保証にならないため却下し、代わりに決定論的な `canUseTool` コールバックで許可判定をハングなく即座に行う。`Read` は意図的にパス制限なし（`Read(*)` 相当）とし、README に安全上のトレードオフを明記する。ツール有効時（既定でも `WebSearch`/`WebFetch` が有効なので既定状態を含む）は `maxTurns` を 1 から引き上げる。
 5. **ADR-0005**: `WebSearch`/`WebFetch` は Anthropic 直接 API 前提であり Bedrock/Vertex/サードパーティ推論プロバイダでは使えないため、`--mcp-config`（ファイルパスのみ）で任意の MCP サーバーをレビュアーに登録できるようにする。`--allow-tool`（`*` のみのグロブ、バックトラッキングなしの自前実装）で実行許可を別ゲートとして分離し、サーバーの登録自体は実行権限を与えない。
+6. **ADR-0006**: 「タイムアウトした」と報告されたが実際にはサーバー自身は完走していた（クライアント側タイムアウトが先に発火した疑い）という間欠事象を後から追跡できるよう、呼び出しごとの start/end を `callId` で相関させた JSONL 診断ログ（メタデータのみ、`appendFileSync` で即書き込み）をプロジェクト別ディレクトリ・プロセス別ファイルで記録する。既定で有効、`FALLBACK_ADVISOR_LOG`/`--no-log` で無効化可能。

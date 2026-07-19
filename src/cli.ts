@@ -18,6 +18,8 @@ export function applyServerOptions(opts: {
   allowWeb?: boolean
   mcpConfig?: string[]
   allowTool?: string[]
+  log?: boolean
+  logDir?: string
 }): void {
   if (opts.model !== undefined) process.env.FALLBACK_ADVISOR_MODEL = opts.model
   if (opts.timeoutMs !== undefined)
@@ -34,6 +36,10 @@ export function applyServerOptions(opts: {
     process.env.FALLBACK_ADVISOR_MCP_CONFIG = opts.mcpConfig.join(" ")
   if (opts.allowTool !== undefined)
     process.env.FALLBACK_ADVISOR_ALLOW_TOOL = opts.allowTool.join(" ")
+  if (opts.log !== undefined)
+    process.env.FALLBACK_ADVISOR_LOG = String(opts.log)
+  if (opts.logDir !== undefined)
+    process.env.FALLBACK_ADVISOR_LOG_DIR = opts.logDir
 }
 
 export function buildProgram(handlers: {
@@ -77,6 +83,18 @@ export function buildProgram(handlers: {
       "--allow-tool <patterns...>",
       'Glob pattern(s) (only \'*\' is a wildcard) granting the reviewer permission to call matching tool names, e.g. registered via --mcp-config ("mcp__brave__*", "mcp__brave__brave_web_search")'
     )
+    .option(
+      "--log",
+      "Write a per-call JSONL call log for diagnostics, metadata only (default: on; pass --no-log to disable)"
+    )
+    .option(
+      "--no-log",
+      "Disable the per-call JSONL call log (it is enabled by default)"
+    )
+    .option(
+      "--log-dir <dir>",
+      "Root directory for the per-call JSONL call log (default: ~/.fallback-advisor/logs)"
+    )
     .action(async (opts) => {
       applyServerOptions({
         model: opts.model,
@@ -87,6 +105,8 @@ export function buildProgram(handlers: {
         allowWeb: opts.allowWeb,
         mcpConfig: opts.mcpConfig,
         allowTool: opts.allowTool,
+        log: opts.log,
+        logDir: opts.logDir,
       })
       await handlers.onServe()
     })
@@ -126,6 +146,12 @@ Environment variables:
   FALLBACK_ADVISOR_ALLOW_TOOL          Space-separated glob pattern(s) (only '*' is a wildcard)
                                        granting the reviewer permission to call matching tool names
                                        (default: none). Same as --allow-tool.
+  FALLBACK_ADVISOR_LOG                 Write a per-call JSONL call log for diagnostics (metadata
+                                       only: transcript/advice bodies are never recorded, only their
+                                       lengths). Default: on/true. Same as --log; disable with
+                                       --no-log or by setting this to false/0.
+  FALLBACK_ADVISOR_LOG_DIR             Root directory for the per-call JSONL call log
+                                       (default: ~/.fallback-advisor/logs). Same as --log-dir.
 
 CLI flags take precedence over the corresponding environment variables.`
   )

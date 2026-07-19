@@ -38,6 +38,22 @@ async function* streamOf(items: FakeMessage[]): AsyncGenerator<FakeMessage> {
   for (const item of items) yield item
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: log records are handled loosely in tests.
+type FakeLogRecord = Record<string, any>
+
+function makeFakeLogger() {
+  const startCalls: FakeLogRecord[] = []
+  const endCalls: FakeLogRecord[] = []
+  return {
+    logger: {
+      logStart: (rec: FakeLogRecord) => startCalls.push(rec),
+      logEnd: (rec: FakeLogRecord) => endCalls.push(rec),
+    },
+    startCalls,
+    endCalls,
+  }
+}
+
 function makeDeps(opts: {
   sessions: Array<{ sessionId: string; lastModified: number }>
   messagesBySession?: Record<string, FakeSessionMessage[]>
@@ -45,6 +61,8 @@ function makeDeps(opts: {
   stderrText?: string
   throwOnSession?: (sessionId: string) => Error | undefined
   queryImpl?: (params: FakeQueryParams) => AsyncGenerator<FakeMessage>
+  // biome-ignore lint/suspicious/noExplicitAny: fake logger shape mirrors AdvisorLogger loosely in tests.
+  logger?: any
 }) {
   const getSessionCalls: string[] = []
   let capturedParams: FakeQueryParams | null = null
@@ -70,6 +88,7 @@ function makeDeps(opts: {
       if (opts.queryImpl) return opts.queryImpl(params)
       return streamOf(opts.queryMessages ?? [])
     },
+    ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
   } as unknown as AdvisorDeps
 
   return {
@@ -891,4 +910,175 @@ test("result error without errors array: the subtype is surfaced", async () => {
   expect(out.advice).toContain(
     "Inference ended with an error (subtype=error_max_turns)"
   )
+})
+
+// ---------------------------------------------------------------------------
+// call log (src/logger.ts): logStart/logEnd are invoked exactly once each,
+// with the outcome matching the FallbackAdvisorOutput for representative
+// paths. The fake logger here is a plain spy injected via deps, independent
+// of FALLBACK_ADVISOR_LOG/_LOG_DIR (no real file I/O in this file).
+// ---------------------------------------------------------------------------
+
+test("call log: success path logs one start and one end with outcome=success", async () => {
+  const { logger, startCalls, endCalls } = makeFakeLogger()
+  const { deps } = makeDeps({
+    sessions: [{ sessionId: "s1", lastModified: 100 }],
+    messagesBySession: { s1: [userMsg("task")] },
+    queryMessages: [
+      { type: "system", subtype: "init" },
+      { type: "result", subtype: "success", result: "ok" },
+    ],
+    logger,
+  })
+
+  const out = await runFallbackAdvisor(baseInput, deps)
+
+  expect(out.isError).toBe(false)
+  expect(startCalls.length).toBe(1)
+  expect(endCalls.length).toBe(1)
+  expect(startCalls[0]?.callId).toBe(endCalls[0]?.callId)
+  expect(typeof startCalls[0]?.callId).toBe("string")
+  expect(endCalls[0]?.outcome).toBe("success")
+  expect(endCalls[0]?.isError).toBe(false)
+  expect(endCalls[0]?.sawInit).toBe(true)
+  expect(typeof endCalls[0]?.durationMs).toBe("number")
+})
+
+test("call log: refusal -> fallback logs outcome=success_fallback", async () => {
+  const { logger, endCalls } = makeFakeLogger()
+  const { deps } = makeDeps({
+    sessions: [{ sessionId: "s1", lastModified: 100 }],
+    messagesBySession: { s1: [userMsg("task")] },
+    queryMessages: [
+      {
+        type: "system",
+        subtype: "model_refusal_fallback",
+        original_model: "claude-fable-5",
+        fallback_model: "claude-strong",
+        api_refusal_category: "policy",
+      },
+      { type: "result", subtype: "success", result: "fallback advice" },
+    ],
+    logger,
+  })
+
+  await runFallbackAdvisor(baseInput, deps)
+
+  expect(endCalls.length).toBe(1)
+  expect(endCalls[0]?.outcome).toBe("success_fallback")
+})
+
+test("call log: assistant-text-only (no result message) logs outcome=success_partial", async () => {
+  const { logger, endCalls } = makeFakeLogger()
+  const { deps } = makeDeps({
+    sessions: [{ sessionId: "s1", lastModified: 100 }],
+    messagesBySession: { s1: [userMsg("task")] },
+    queryMessages: [
+      {
+        type: "assistant",
+        message: { model: "claude-x", content: [{ type: "text", text: "a" }] },
+      },
+    ],
+    logger,
+  })
+
+  await runFallbackAdvisor(baseInput, deps)
+
+  expect(endCalls.length).toBe(1)
+  expect(endCalls[0]?.outcome).toBe("success_partial")
+})
+
+test("call log: timeout logs outcome=timeout with sawInit false and no logStart-skip", async () => {
+  const { logger, startCalls, endCalls } = makeFakeLogger()
+  const { deps } = makeDeps({
+    sessions: [{ sessionId: "s1", lastModified: 100 }],
+    messagesBySession: { s1: [userMsg("task")] },
+    queryImpl: (params) => {
+      const ac = params.options.abortController as AbortController
+      ac.abort()
+      throw new Error("The operation was aborted")
+    },
+    logger,
+  })
+
+  const out = await runFallbackAdvisor(baseInput, deps)
+
+  expect(out.isError).toBe(true)
+  expect(startCalls.length).toBe(1)
+  expect(endCalls.length).toBe(1)
+  expect(endCalls[0]?.outcome).toBe("timeout")
+  expect(endCalls[0]?.isError).toBe(true)
+})
+
+test("call log: no sessions logs outcome=no_sessions without ever calling logStart's config claudePath check", async () => {
+  const { logger, startCalls, endCalls } = makeFakeLogger()
+  const { deps } = makeDeps({ sessions: [], logger })
+
+  const out = await runFallbackAdvisor({ cwd: "/tmp/does-not-matter" }, deps)
+
+  expect(out.isError).toBe(true)
+  expect(startCalls.length).toBe(1)
+  expect(endCalls.length).toBe(1)
+  expect(endCalls[0]?.outcome).toBe("no_sessions")
+  expect(endCalls[0]?.isError).toBe(true)
+})
+
+test("call log: a missing claude executable logs outcome=claude_path_missing", async () => {
+  const { logger, startCalls, endCalls } = makeFakeLogger()
+  const { deps } = makeDeps({
+    sessions: [{ sessionId: "s1", lastModified: 100 }],
+    messagesBySession: { s1: [userMsg("task")] },
+    logger,
+  })
+
+  const prev = process.env.FALLBACK_ADVISOR_CLAUDE_PATH
+  process.env.FALLBACK_ADVISOR_CLAUDE_PATH =
+    "/nonexistent/path/claude-does-not-exist-12345"
+  try {
+    const out = await runFallbackAdvisor(baseInput, deps)
+
+    expect(out.isError).toBe(true)
+    expect(startCalls.length).toBe(1)
+    expect(endCalls.length).toBe(1)
+    expect(endCalls[0]?.outcome).toBe("claude_path_missing")
+  } finally {
+    if (prev === undefined) delete process.env.FALLBACK_ADVISOR_CLAUDE_PATH
+    else process.env.FALLBACK_ADVISOR_CLAUDE_PATH = prev
+  }
+})
+
+test("call log: refusal with no fallback logs outcome=refusal_no_fallback", async () => {
+  const { logger, endCalls } = makeFakeLogger()
+  const { deps } = makeDeps({
+    sessions: [{ sessionId: "s1", lastModified: 100 }],
+    messagesBySession: { s1: [userMsg("task")] },
+    queryMessages: [
+      {
+        type: "system",
+        subtype: "model_refusal_no_fallback",
+        api_refusal_category: "policy",
+      },
+    ],
+    logger,
+  })
+
+  await runFallbackAdvisor(baseInput, deps)
+
+  expect(endCalls.length).toBe(1)
+  expect(endCalls[0]?.outcome).toBe("refusal_no_fallback")
+  expect(endCalls[0]?.isError).toBe(true)
+})
+
+test("call log: no logger in deps (default AdvisorDeps.logger undefined) does not throw", async () => {
+  const { deps } = makeDeps({
+    sessions: [{ sessionId: "s1", lastModified: 100 }],
+    messagesBySession: { s1: [userMsg("task")] },
+    queryMessages: [{ type: "result", subtype: "success", result: "ok" }],
+  })
+
+  // No `logger` passed to makeDeps: AdvisorDeps.logger stays undefined, so
+  // every deps.logger?.logStart/logEnd call is a no-op, and runFallbackAdvisor
+  // must not throw or otherwise behave differently.
+  const out = await runFallbackAdvisor(baseInput, deps)
+  expect(out.isError).toBe(false)
 })
